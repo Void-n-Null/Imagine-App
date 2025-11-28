@@ -1,7 +1,4 @@
-<table><tr>
-<td><img src="./logo_rounded.png" width="42" height="42"></td>
-<td><h1>Imagine App - Best Buy Shopping Assistant</h1></td>
-</tr></table> 
+# <img src="./logo_rounded.png" width="32" height="32" align="center"> Imagine App - Best Buy Shopping Assistant
 
 A mobile AI-powered shopping assistant that leverages Best Buy's public APIs and agentic AI to help with product discovery, recommendations, and information lookup. Built to solve real problems I encountered working as a sales associate at Best Buy.
 
