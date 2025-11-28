@@ -1,0 +1,70 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Flutter: Run (with API keys)",
+      "type": "shell",
+      "command": "source .env && flutter run --dart-define=BESTBUY_API_KEY=\"$BESTBUY_API_KEY\"",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "Flutter: Run Debug (with API keys)",
+      "type": "shell",
+      "command": "source .env && flutter run --debug --dart-define=BESTBUY_API_KEY=\"$BESTBUY_API_KEY\"",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "Flutter: Build APK Release",
+      "type": "shell",
+      "command": "source .env && flutter build apk --release --dart-define=BESTBUY_API_KEY=\"$BESTBUY_API_KEY\"",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "Flutter: Build App Bundle Release",
+      "type": "shell",
+      "command": "source .env && flutter build appbundle --release --dart-define=BESTBUY_API_KEY=\"$BESTBUY_API_KEY\"",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "Flutter: Build iOS Release",
+      "type": "shell",
+      "command": "source .env && flutter build ios --release --dart-define=BESTBUY_API_KEY=\"$BESTBUY_API_KEY\"",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "Flutter: Build Linux Release",
+      "type": "shell",
+      "command": "source .env && flutter build linux --release --dart-define=BESTBUY_API_KEY=\"$BESTBUY_API_KEY\"",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    }
+  ]
+}
+

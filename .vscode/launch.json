@@ -1,0 +1,24 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "ImagineApp (Debug)",
+            "request": "launch",
+            "type": "dart",
+            "flutterMode": "debug",
+            "args": [
+                "--dart-define=BESTBUY_API_KEY=YOUR_API_KEY_HERE"
+            ]
+        },
+        {
+            "name": "ImagineApp (Release)",
+            "request": "launch",
+            "type": "dart",
+            "flutterMode": "release",
+            "args": [
+                "--dart-define=BESTBUY_API_KEY=YOUR_API_KEY_HERE"
+            ]
+        }
+    ]
+}
+
