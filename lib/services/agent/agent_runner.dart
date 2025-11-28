@@ -176,7 +176,7 @@ class AgentRunner {
           'Authorization': 'Bearer $apiKey',
           'Content-Type': 'application/json',
           'HTTP-Referer': 'https://github.com/imagineapp',
-          'X-Title': 'ImagineApp',
+          'X-Title': 'Imagine App',
         },
         body: jsonEncode(body),
       );

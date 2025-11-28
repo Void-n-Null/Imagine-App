@@ -27,7 +27,7 @@ class OpenRouterClient {
         'Authorization': 'Bearer $apiKey',
         'Content-Type': 'application/json',
         'HTTP-Referer': 'https://github.com/imagineapp', // Optional but recommended
-        'X-Title': 'ImagineApp', // Optional but recommended
+        'X-Title': 'Imagine App', // Optional but recommended
       },
       body: jsonEncode({
         'model': model,

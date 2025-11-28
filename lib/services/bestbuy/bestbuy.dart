@@ -8,7 +8,7 @@
 /// 2. Create a client instance:
 ///
 /// ```dart
-/// import 'package:imagine_app/services/bestbuy/bestbuy.dart';
+/// import 'package:imagineapp/services/bestbuy/bestbuy.dart';
 ///
 /// final client = BestBuyClient(apiKey: 'YOUR_API_KEY');
 /// ```

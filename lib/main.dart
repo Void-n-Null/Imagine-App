@@ -21,7 +21,7 @@ class ImagineApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'ImagineApp',
+      title: 'Imagine App',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,

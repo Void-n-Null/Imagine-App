@@ -17,7 +17,7 @@ class ChatAgentManager {
       createAgentRunner(selectedModelId);
     } catch (e) {
       // Use fallback prompt
-      systemPrompt = '''You are a helpful assistant in the ImagineApp. 
+      systemPrompt = '''You are a helpful assistant in Imagine App. 
 You can help users with various tasks using the tools available to you.
 When showing products, use [Product(SKU)] syntax.
 Be concise but friendly in your responses.''';
