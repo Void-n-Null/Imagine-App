@@ -4,7 +4,7 @@ A mobile AI-powered shopping assistant that leverages Best Buy's public APIs and
 
 <table>
   <tr>
-    <td><img src="./landing_example.jpg" alt="ImagineApp UI" height="280"></td>
+    <td><img src="./landing_example.jpg" alt="ImagineApp UI" height="480" width="400"></td>
     <td>
       <b>Clean, intuitive mobile UI</b><br><br>
       • Chat interface with rich product cards<br>
