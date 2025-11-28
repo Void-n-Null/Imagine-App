@@ -2,16 +2,18 @@
 
 A mobile AI-powered shopping assistant that leverages Best Buy's public APIs and agentic AI to help with product discovery, recommendations, and information lookup. Built to solve real problems I encountered working as a sales associate at Best Buy.
 
-<p align="center">
-  <img src="./landing_example.jpg" alt="ImagineApp UI" height="240" style="display:inline-block;margin-right:32px;vertical-align:middle;">
-  <span style="display:inline-block;text-align:left;vertical-align:middle;font-size:1.05em;">
-    <b>Clean, intuitive mobile UI</b><br>
-    - Chat interface with rich product cards<br>
-    - One-tap product details and barcode scan<br>
-    - Choose from 200+ LLM models in settings<br>
-    - Dark theme makes it feel modern
-  </span>
-</p>
+<table>
+  <tr>
+    <td><img src="./landing_example.jpg" alt="ImagineApp UI" height="280"></td>
+    <td>
+      <b>Clean, intuitive mobile UI</b><br><br>
+      • Chat interface with rich product cards<br>
+      • One-tap product details and barcode scan<br>
+      • Choose from 200+ LLM models in settings<br>
+      • Dark theme makes it feel modern
+    </td>
+  </tr>
+</table>
 
 ## The Problem
 
