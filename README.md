@@ -100,9 +100,9 @@ Available tools:
 |------|---------|
 | `search_products` | Search Best Buy catalog with filters (price, brand, rating, availability, sale status) |
 | `analyze_product` | Get detailed specs for a specific product by SKU or UPC |
-| `get_time` | Get current date/time for context-aware responses |
 
-The tool schemas are automatically converted to OpenAI-compatible function definitions and sent with each LLM request.
+
+The tool schemas are automatically converted to OpenAI-compatible function definitions and sent with each LLM request. With just these 2 tools, the agentic AI gets an effortless ability to ground itself on real Best Buy product info, avoiding halucinations.
 
 ### Best Buy API Client
 
