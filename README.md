@@ -1,6 +1,6 @@
 <img src="./logo_rounded.png" align="left" width="36" height="36" style="border-radius: 9px; margin-right: 16px;">
 
-# ImagineApp - Best Buy Shopping Assistant
+# Imagine App - Best Buy Shopping Assistant
 
 <br clear="left">
 
@@ -8,8 +8,8 @@ A mobile AI-powered shopping assistant that leverages Best Buy's public APIs and
 
 <table>
   <tr>
-    <td><img src="./landing_example.jpg" alt="ImagineApp Landing UI" height="480" width="400"></td>
-    <td><img src="./chat_exmaple.png" alt="ImagineApp Chat UI" height="480" width="400"></td>
+    <td><img src="./landing_example.jpg" alt="Imagine App Landing UI" height="480" width="400"></td>
+    <td><img src="./chat_exmaple.png" alt="Imagine App Chat UI" height="480" width="400"></td>
     <td>
       <b>Clean, intuitive mobile UI</b><br><br>
       • Chat interface with rich product cards<br>
@@ -29,7 +29,7 @@ Working as a sales associate at Best Buy, I frequently encountered situations wh
 - Answering detailed specification questions required navigating multiple screens
 - Recommending products based on customer needs meant mentally juggling dozens of options
 
-I built ImagineApp to solve these problems by creating an intelligent assistant that can search, analyze, and recommend products conversationally. It's powered by the same public APIs that Best Buy makes available to developers.
+I built Imagine App to solve these problems by creating an intelligent assistant that can search, analyze, and recommend products conversationally. It's powered by the same public APIs that Best Buy makes available to developers.
 
 ## What's Inside
 
@@ -52,7 +52,7 @@ I built ImagineApp to solve these problems by creating an intelligent assistant 
 
 ### Agentic Loop
 
-The core of ImagineApp is the `AgentRunner`, which implements a classic agentic loop:
+The core of Imagine App is the `AgentRunner`, which implements a classic agentic loop:
 
 ```
 User Message → LLM → Tool Calls? → Execute Tools → LLM → ... → Final Response

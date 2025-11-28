@@ -1,6 +1,6 @@
 {
-    "name": "imagine_app",
-    "short_name": "imagine_app",
+    "name": "Imagine App",
+    "short_name": "Imagine App",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
