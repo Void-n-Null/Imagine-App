@@ -1,12 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- Dark background matching app theme -->
+    <!-- Dark background matching app theme - no logo, just solid color -->
     <item android:drawable="@color/splash_background" />
-
-    <!-- Centered logo -->
-    <item>
-        <bitmap
-            android:gravity="center"
-            android:src="@drawable/splash_logo" />
-    </item>
 </layer-list>

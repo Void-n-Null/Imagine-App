@@ -1,11 +1,21 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'services/storage/storage.dart';
 import 'theme/app_colors.dart';
 import 'widgets/chat_page.dart';
+import 'widgets/splash_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // Set system UI overlay style for splash
+  SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+    statusBarColor: AppColors.background,
+    statusBarIconBrightness: Brightness.light,
+    systemNavigationBarColor: AppColors.background,
+    systemNavigationBarIconBrightness: Brightness.light,
+  ));
   
   // Initialize storage services
   await SettingsService.initialize();
@@ -94,7 +104,35 @@ class ImagineApp extends StatelessWidget {
           ),
         ),
       ),
-      home: const ChatPage(),
+      home: const AppWithSplash(),
+    );
+  }
+}
+
+class AppWithSplash extends StatefulWidget {
+  const AppWithSplash({super.key});
+
+  @override
+  State<AppWithSplash> createState() => _AppWithSplashState();
+}
+
+class _AppWithSplashState extends State<AppWithSplash> {
+  bool _showSplash = true;
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      children: [
+        const ChatPage(),
+        if (_showSplash)
+          SplashScreen(
+            onComplete: () {
+              setState(() {
+                _showSplash = false;
+              });
+            },
+          ),
+      ],
     );
   }
 }
