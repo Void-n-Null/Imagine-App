@@ -438,6 +438,89 @@ class ProductSearchBuilder {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
+  // Exclusion filters (for blocking unwanted product types)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /// Excludes protection plans and warranties.
+  ///
+  /// Filters out products from AppleCare, Geek Squad Protection, and
+  /// other warranty/protection plan manufacturers. Also excludes the
+  /// Geek Squad Warranties category and all its subcategories.
+  ///
+  /// Key filters:
+  /// - type!=BlackTie (Best Buy's internal type for all protection plans)
+  /// - categoryPath.id!=pcmcat1500564963044 (Geek Squad Warranties parent)
+  /// - manufacturer exclusions for AppleCare and Geek Squad
+  ProductSearchBuilder excludeProtectionPlans() {
+    // BlackTie is the internal type used for ALL protection plans/warranties
+    _filters.add('type!=BlackTie');
+    // Exclude Geek Squad Warranties category and all subcategories
+    _filters.add('categoryPath.id!=pcmcat1500564963044');
+    // Exclude Services parent category
+    _filters.add('categoryPath.id!=pcmcat1528819595254');
+    // Exclude by manufacturer as backup
+    _filters.add('manufacturer!="AppleCare"');
+    _filters.add('manufacturer!="Geek Squad®"');
+    return this;
+  }
+
+  /// Excludes gift cards.
+  ///
+  /// Filters out all gift cards using the parent category ID.
+  /// - cat09000: "Gift Cards" (top-level parent)
+  /// - pcmcat325900050007: "Specialty Gift Cards" (covers gaming, restaurant, retail, etc.)
+  ProductSearchBuilder excludeGiftCards() {
+    // Exclude the main Gift Cards category and all subcategories
+    _filters.add('categoryPath.id!=cat09000');
+    return this;
+  }
+
+  /// Excludes digital-only content (downloads, streaming, etc.).
+  ///
+  /// Uses the digital=false filter which excludes:
+  /// - Digital game downloads
+  /// - Digital gift cards
+  /// - Software downloads
+  /// - Streaming content
+  ProductSearchBuilder excludeDigitalContent() {
+    _filters.add('digital=false');
+    return this;
+  }
+
+  /// Excludes accessories (cables, cases, mounts, etc.).
+  ///
+  /// Note: Accessories use type=HardGood like regular products, so we filter
+  /// by specific accessory category IDs.
+  ///
+  /// Categories excluded:
+  /// - abcat0811002: Cell Phone Accessories
+  /// - abcat0107000: TV & Home Theater Accessories  
+  /// - abcat0515000: Computer Accessories & Peripherals
+  /// - abcat0410000: Digital Camera Accessories
+  /// - abcat0715000: Video Game Accessories
+  /// - abcat0208000: Home Audio Accessories
+  ProductSearchBuilder excludeAccessories() {
+    _filters.add('categoryPath.id!=abcat0811002'); // Cell Phone Accessories
+    _filters.add('categoryPath.id!=abcat0107000'); // TV & Home Theater Accessories
+    _filters.add('categoryPath.id!=abcat0515000'); // Computer Accessories & Peripherals
+    _filters.add('categoryPath.id!=abcat0410000'); // Digital Camera Accessories
+    _filters.add('categoryPath.id!=abcat0715000'); // Video Game Accessories
+    _filters.add('categoryPath.id!=abcat0208000'); // Home Audio Accessories
+    return this;
+  }
+
+  /// Applies all common exclusions for cleaner search results.
+  ///
+  /// Excludes: protection plans, gift cards, digital content.
+  /// Note: excludeMarketplace() is NOT included as it can incorrectly filter products.
+  ProductSearchBuilder excludeCommonNoise() {
+    excludeProtectionPlans();
+    excludeGiftCards();
+    excludeDigitalContent();
+    return this;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
   // Rating filters
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -625,6 +708,43 @@ class ProductSearchBuilder {
     final params = buildParams();
     return 'ProductSearchBuilder(${params.entries.map((e) => '${e.key}=${e.value}').join(', ')})';
   }
+
+  /// Builds comprehensive debug information about the current query.
+  ///
+  /// Returns a map with all query components for logging and debugging.
+  Map<String, dynamic> buildDebugInfo() {
+    final params = buildParams();
+    final query = params['_query'] ?? '';
+    
+    return {
+      'searchTerms': List<String>.from(_searchTerms),
+      'filters': List<String>.from(_filters),
+      'filterCount': _filters.length,
+      'sort': _sort?.value ?? 'default',
+      'sortName': _sort?.name ?? 'bestSellingRank',
+      'page': _page,
+      'pageSize': _pageSize,
+      'attributes': _attributes.map((a) => a.value).toList(),
+      'attributeCount': _attributes.length,
+      'rawQuery': query,
+      'params': Map<String, String>.from(params)..remove('_query'),
+    };
+  }
+
+  /// Returns a copy of the current search terms.
+  List<String> get searchTerms => List<String>.from(_searchTerms);
+
+  /// Returns a copy of the current filters.
+  List<String> get currentFilters => List<String>.from(_filters);
+
+  /// Returns the current sort option.
+  ProductSort? get currentSort => _sort;
+
+  /// Returns the current page size.
+  int get currentPageSize => _pageSize;
+
+  /// Returns the current page number.
+  int get currentPage => _page;
 }
 
 /// Product condition options.

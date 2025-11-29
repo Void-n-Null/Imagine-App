@@ -81,4 +81,5 @@ export 'models/product.dart';
 export 'models/search_response.dart';
 export 'models/store.dart';
 export 'search_builder.dart';
+export 'search_debug_logger.dart';
 

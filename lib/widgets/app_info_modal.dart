@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
+import 'search_debug_page.dart';
 
 class AppInfoModal extends StatelessWidget {
   const AppInfoModal({super.key});
@@ -58,9 +59,9 @@ class AppInfoModal extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: AppColors.error.withOpacity(0.1),
+              color: AppColors.error.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: AppColors.error.withOpacity(0.3)),
+              border: Border.all(color: AppColors.error.withValues(alpha: 0.3)),
             ),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -103,6 +104,29 @@ class AppInfoModal extends StatelessWidget {
             icon: Icons.gavel_rounded,
           ),
           const SizedBox(height: 24),
+          
+          // Developer Tools Button
+          OutlinedButton.icon(
+            onPressed: () {
+              Navigator.pop(context);
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (context) => const SearchDebugPage(),
+                ),
+              );
+            },
+            icon: const Icon(Icons.bug_report_rounded, size: 20),
+            label: const Text('Search Debug Tools'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppColors.accentYellow,
+              side: BorderSide(color: AppColors.accentYellow.withValues(alpha: 0.5)),
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
           
           // Close Button
           FilledButton(
