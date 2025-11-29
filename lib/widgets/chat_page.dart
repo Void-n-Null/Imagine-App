@@ -3,6 +3,8 @@ import '../config/api_keys.dart';
 import '../services/agent/agent.dart';
 import '../services/agent/chat_message.dart';
 import '../services/agent/prompt_loader.dart';
+import '../services/agent/scan_request_service.dart';
+import '../services/agent/tools/request_scan_tool.dart';
 import '../services/bestbuy/bestbuy.dart';
 import '../services/openrouter/openrouter_auth_page.dart';
 import '../services/openrouter/openrouter_auth_service.dart';
@@ -27,7 +29,7 @@ import '../services/agent/tool_registry.dart';
 
 /// Set to true to show tool call debug button in the UI.
 /// This allows viewing the exact tool calls and their results.
-const bool kShowToolCallDebug = true;
+const bool kShowToolCallDebug = false;
 
 class ChatPage extends StatefulWidget {
   /// Optional product to attach to the first message
@@ -50,10 +52,12 @@ class _ChatPageState extends State<ChatPage> {
   late final ChatModelManager _modelManager;
   late final ChatAgentManager _agentManager;
   late final StatusQueueManager _statusManager;
+  late final ScanRequestService _scanRequestService;
   
   bool _isAuthenticated = false;
   bool _isProcessing = false;
   bool _isInitialized = false;
+  bool _isNavigatingToScan = false; // Prevent duplicate navigations
   
   // Product attachment for "Ask AI" feature
   BestBuyProduct? _attachedProduct;
@@ -88,6 +92,7 @@ class _ChatPageState extends State<ChatPage> {
       promptLoader: PromptLoader(),
     );
     _statusManager = StatusQueueManager();
+    _scanRequestService = ScanRequestService.instance;
     
     // Initialize attached product from navigation
     _attachedProduct = widget.initialProduct;
@@ -100,10 +105,43 @@ class _ChatPageState extends State<ChatPage> {
     // Listen for chat manager changes
     _chatManager.addListener(_onChatManagerChanged);
     
+    // Listen for scan requests from AI tools
+    _scanRequestService.addListener(_onScanRequestChanged);
+    
     // Register tools
     _registerTools();
     
     _initialize();
+  }
+  
+  /// Handle scan request service changes
+  void _onScanRequestChanged() {
+    if (!mounted) return;
+    
+    // If there's an active scan request and we're not already navigating, go to scanner
+    if (_scanRequestService.hasActiveRequest && !_isNavigatingToScan) {
+      _navigateToScannerForRequest();
+    }
+  }
+  
+  /// Navigate to scanner page for an AI-requested scan
+  void _navigateToScannerForRequest() {
+    final request = _scanRequestService.activeRequest;
+    if (request == null) return;
+    
+    _isNavigatingToScan = true;
+    
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => const ScanProductPage(),
+        settings: RouteSettings(
+          arguments: ScanRequestArgs(request: request),
+        ),
+      ),
+    ).then((_) {
+      // Reset navigation flag when returning
+      _isNavigatingToScan = false;
+    });
   }
   
   void _onChatManagerChanged() {
@@ -144,12 +182,14 @@ class _ChatPageState extends State<ChatPage> {
     registry.register(GetTimeTool());
     registry.register(SearchProductsTool(client: _bestBuyClient));
     registry.register(AnalyzeProductTool(client: _bestBuyClient));
+    registry.register(RequestScanTool());
   }
   
 
   @override
   void dispose() {
     _chatManager.removeListener(_onChatManagerChanged);
+    _scanRequestService.removeListener(_onScanRequestChanged);
     _inputController.dispose();
     _scrollController.dispose();
     _agentManager.dispose();
