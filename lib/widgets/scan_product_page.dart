@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../config/api_keys.dart';
@@ -24,9 +25,11 @@ class ScanProductPage extends StatefulWidget {
 }
 
 class _ScanProductPageState extends State<ScanProductPage> {
+  // Controller with autoStart - the MobileScanner widget handles lifecycle
   final MobileScannerController _scannerController = MobileScannerController(
-    detectionSpeed: DetectionSpeed.noDuplicates,
+    detectionSpeed: DetectionSpeed.normal,
     facing: CameraFacing.back,
+    autoStart: true,
   );
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocusNode = FocusNode();
@@ -38,10 +41,13 @@ class _ScanProductPageState extends State<ScanProductPage> {
   Timer? _countdownTimer;
   int _remainingSeconds = 20;
   bool _hasNavigatedBack = false;
+  
+  // Debounce/cooldown logic
+  String? _lastScannedCode;
+  bool _isLookingUp = false;
+  Timer? _cooldownTimer;
 
-  bool _isScanning = false;
-  bool _isLoadingProduct = false;
-  String? _loadingMessage;
+  bool _didCheckArgs = false;
 
   /// Whether we're in scan request mode (triggered by AI)
   bool get _isRequestMode => _scanRequest != null;
@@ -50,6 +56,11 @@ class _ScanProductPageState extends State<ScanProductPage> {
   void initState() {
     super.initState();
     _bestBuyClient = BestBuyClient(apiKey: ApiKeys.bestBuy);
+    
+    // Lock orientation to portrait for consistent camera view
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+    ]);
   }
   
   @override
@@ -57,24 +68,29 @@ class _ScanProductPageState extends State<ScanProductPage> {
     super.didChangeDependencies();
     
     // Check for scan request args (only once)
-    if (_scanRequest == null) {
+    if (!_didCheckArgs) {
+      _didCheckArgs = true;
       final args = ModalRoute.of(context)?.settings.arguments;
       if (args is ScanRequestArgs) {
         _scanRequest = args.request;
         _remainingSeconds = args.request.remainingTime.inSeconds;
-        
-        // Auto-start scanning in request mode
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          _startScanning();
-          _startCountdown();
-        });
+        _startCountdown();
       }
     }
   }
 
   @override
   void dispose() {
+    // Restore all orientations when leaving
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]);
+    
     _countdownTimer?.cancel();
+    _cooldownTimer?.cancel();
     _scannerController.dispose();
     _searchController.dispose();
     _searchFocusNode.dispose();
@@ -109,20 +125,12 @@ class _ScanProductPageState extends State<ScanProductPage> {
   }
   
   void _handleCancel() {
-    if (_hasNavigatedBack) return;
-    _hasNavigatedBack = true;
-    
-    ScanRequestService.instance.cancelScan('User cancelled');
-    Navigator.of(context).pop();
-  }
-  
-  /// Handle back button in request mode
-  Future<bool> _onWillPop() async {
-    if (_isRequestMode && !_hasNavigatedBack) {
-      _handleCancel();
-      return false; // We handle navigation ourselves
+    if (_isRequestMode) {
+      if (_hasNavigatedBack) return;
+      _hasNavigatedBack = true;
+      ScanRequestService.instance.cancelScan('User cancelled');
     }
-    return true;
+    Navigator.of(context).pop();
   }
 
   void _navigateToSearch({String? initialQuery}) {
@@ -134,68 +142,27 @@ class _ScanProductPageState extends State<ScanProductPage> {
         ),
       ),
     ).then((_) {
-      // Clear search field when returning
       _searchController.clear();
     });
   }
 
-  Future<void> _startScanning() async {
-    if (_isScanning) {
-      return;
-    }
-
-    setState(() {
-      _isScanning = true;
-    });
-
-    await WidgetsBinding.instance.endOfFrame;
-
-    try {
-      await _scannerController.start();
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-      setState(() => _isScanning = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Unable to start camera: $error'),
-          backgroundColor: AppColors.error,
-        ),
-      );
-    }
-  }
-
-  Future<void> _stopScanning() async {
-    if (!_isScanning) {
-      return;
-    }
-    setState(() => _isScanning = false);
-    try {
-      await _scannerController.stop();
-    } catch (_) {
-      // Ignore stop failures; controller handles its own lifecycle.
-    }
-  }
-
   void _handleDetection(BarcodeCapture capture) {
-    if (!_isScanning || _isLoadingProduct) {
-      return;
-    }
+    // Don't process if we're already looking up, in cooldown, or navigated away
+    if (_isLookingUp || _hasNavigatedBack) return;
 
     for (final barcode in capture.barcodes) {
       final String? value = barcode.rawValue;
-      if (value == null || value.isEmpty) {
-        continue;
-      }
-
-      unawaited(_stopScanning());
-
+      if (value == null || value.isEmpty) continue;
+      
+      // Skip if same as last scanned code (prevents duplicate scans)
+      if (value == _lastScannedCode) continue;
+      
+      _lastScannedCode = value;
+      
       // Determine if this is a UPC or SKU and look up the product
       if (_isUpcFormat(barcode.format)) {
         _lookupProductByUpc(value);
       } else if (barcode.format == BarcodeFormat.qrCode) {
-        // QR codes can contain either UPC or SKU
         _lookupProductFromQrCode(value);
       } else {
         // Try as SKU for other formats
@@ -213,10 +180,25 @@ class _ScanProductPageState extends State<ScanProductPage> {
   }
 
   Future<void> _lookupProductFromQrCode(String value) async {
-    // QR codes can contain UPCs (numeric, typically 12-13 digits) or SKUs (typically numeric, 7-8 digits)
-    // Try to determine which one based on the format
-    
     final cleanValue = value.trim();
+    
+    // Check for Best Buy in-store QR code URLs
+    // Format: http://bby.us/?c=BB006116636938&LMD=true
+    // The 'c' parameter is: BB + 5-digit store number + SKU
+    final bbyUrlMatch = RegExp(r'bby\.us/?\?c=BB\d{5}(\d+)', caseSensitive: false).firstMatch(cleanValue);
+    if (bbyUrlMatch != null) {
+      final sku = bbyUrlMatch.group(1)!;
+      await _lookupProductBySku(sku);
+      return;
+    }
+    
+    // Check for Best Buy product page URLs (bestbuy.com/site/*/skuId.p)
+    final bbySiteMatch = RegExp(r'bestbuy\.com/site/[^/]+/(\d+)\.p', caseSensitive: false).firstMatch(cleanValue);
+    if (bbySiteMatch != null) {
+      final sku = bbySiteMatch.group(1)!;
+      await _lookupProductBySku(sku);
+      return;
+    }
     
     // Check if it's purely numeric
     if (RegExp(r'^\d+$').hasMatch(cleanValue)) {
@@ -226,32 +208,32 @@ class _ScanProductPageState extends State<ScanProductPage> {
       } else if (cleanValue.length >= 6 && cleanValue.length <= 10) {
         // Likely a SKU (Best Buy SKUs are typically 7-8 digits)
         await _lookupProductBySku(cleanValue);
+      } else if (cleanValue.length < 6) {
+        // Too short, probably not valid
+        _handleInvalidBarcode('Code too short');
       } else {
-        // Try UPC first, then SKU
+        // Try UPC first, then SKU as fallback
         await _lookupProductByUpc(cleanValue, fallbackToSku: true);
       }
     } else {
-      // Non-numeric, might be a URL or other format - try as SKU
-      // Extract numbers if it looks like a URL with a product ID
+      // Non-numeric, might be a URL or other format
+      // Try to extract SKU from URL patterns or raw numbers
       final skuMatch = RegExp(r'(\d{6,10})').firstMatch(cleanValue);
       if (skuMatch != null) {
         await _lookupProductBySku(skuMatch.group(1)!);
       } else {
-        _handleScanError('Could not parse QR code: $cleanValue');
+        _handleInvalidBarcode('Not a product code');
       }
     }
   }
 
   Future<void> _lookupProductByUpc(String upc, {bool fallbackToSku = false}) async {
     if (ApiKeys.bestBuy.isEmpty) {
-      _handleScanError('API key not configured');
+      _handleInvalidBarcode('API key not configured');
       return;
     }
 
-    setState(() {
-      _isLoadingProduct = true;
-      _loadingMessage = 'Looking up UPC: $upc';
-    });
+    _isLookingUp = true;
 
     try {
       final product = await _bestBuyClient.getProductByUpc(upc);
@@ -260,10 +242,9 @@ class _ScanProductPageState extends State<ScanProductPage> {
       if (product != null) {
         _handleProductFound(product);
       } else if (fallbackToSku) {
-        // Try as SKU instead
         await _lookupProductBySku(upc);
       } else {
-        _handleProductNotFound(upc);
+        _handleInvalidBarcode('Not a Best Buy product');
       }
     } catch (e) {
       if (!mounted) return;
@@ -271,28 +252,24 @@ class _ScanProductPageState extends State<ScanProductPage> {
       if (fallbackToSku) {
         await _lookupProductBySku(upc);
       } else {
-        _handleScanError('Error looking up product: ${_formatError(e)}');
+        _handleInvalidBarcode('Not a Best Buy product');
       }
     }
   }
 
   Future<void> _lookupProductBySku(String sku) async {
     if (ApiKeys.bestBuy.isEmpty) {
-      _handleScanError('API key not configured');
+      _handleInvalidBarcode('API key not configured');
       return;
     }
 
-    // Try to parse as int for SKU lookup
     final skuInt = int.tryParse(sku);
     if (skuInt == null) {
-      _handleScanError('Invalid SKU format: $sku');
+      _handleInvalidBarcode('Invalid code format');
       return;
     }
 
-    setState(() {
-      _isLoadingProduct = true;
-      _loadingMessage = 'Looking up SKU: $sku';
-    });
+    _isLookingUp = true;
 
     try {
       final product = await _bestBuyClient.getProductBySku(skuInt);
@@ -301,19 +278,16 @@ class _ScanProductPageState extends State<ScanProductPage> {
       if (product != null) {
         _handleProductFound(product);
       } else {
-        _handleProductNotFound(sku);
+        _handleInvalidBarcode('Not a Best Buy product');
       }
     } catch (e) {
       if (!mounted) return;
-      _handleScanError('Error looking up product: ${_formatError(e)}');
+      _handleInvalidBarcode('Not a Best Buy product');
     }
   }
   
   void _handleProductFound(BestBuyProduct product) {
-    setState(() {
-      _isLoadingProduct = false;
-      _loadingMessage = null;
-    });
+    _isLookingUp = false;
     
     if (_isRequestMode) {
       // In request mode, complete the scan request and go back
@@ -329,64 +303,50 @@ class _ScanProductPageState extends State<ScanProductPage> {
         MaterialPageRoute(
           builder: (context) => ProductDetailPage(product: product),
         ),
-      );
+      ).then((_) {
+        // Reset last scanned code when returning so user can scan again
+        _lastScannedCode = null;
+      });
     }
   }
   
-  void _handleProductNotFound(String code) {
-    setState(() {
-      _isLoadingProduct = false;
-      _loadingMessage = null;
-    });
+  /// Handle invalid barcode - show tip and continue scanning after 1 second
+  void _handleInvalidBarcode(String message) {
+    _isLookingUp = false;
     
-    if (_isRequestMode) {
-      // In request mode, report not found and go back
-      if (!_hasNavigatedBack) {
-        _hasNavigatedBack = true;
-        _countdownTimer?.cancel();
-        ScanRequestService.instance.completeNotFound(code);
-        Navigator.of(context).pop();
-      }
-    } else {
-      // Normal mode: show error
-      _showError('Product not found for code: $code');
-    }
-  }
-  
-  void _handleScanError(String message) {
-    setState(() {
-      _isLoadingProduct = false;
-      _loadingMessage = null;
-    });
+    // Show a brief non-blocking tip
+    _showTip(message);
     
-    if (_isRequestMode) {
-      // In request mode, report error and go back
-      if (!_hasNavigatedBack) {
-        _hasNavigatedBack = true;
-        _countdownTimer?.cancel();
-        ScanRequestService.instance.completeError(message);
-        Navigator.of(context).pop();
-      }
-    } else {
-      // Normal mode: show error snackbar
-      _showError(message);
-    }
+    // Start cooldown - wait 1 second before allowing next scan
+    _cooldownTimer?.cancel();
+    _cooldownTimer = Timer(const Duration(seconds: 1), () {
+      // Allow scanning the same code again after cooldown
+      _lastScannedCode = null;
+    });
   }
 
-  String _formatError(dynamic e) {
-    if (e is BestBuyApiException) return e.message;
-    if (e is BestBuyNetworkException) return 'Network error: ${e.message}';
-    return e.toString();
-  }
-
-  void _showError(String message) {
+  /// Show a brief tip/toast that doesn't interrupt scanning
+  void _showTip(String message, {bool isError = false}) {
     if (!mounted) return;
+    
+    ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(message),
-        backgroundColor: AppColors.error,
+        content: Row(
+          children: [
+            Icon(
+              isError ? Icons.error_outline : Icons.info_outline,
+              color: Colors.white,
+              size: 18,
+            ),
+            const SizedBox(width: 8),
+            Text(message),
+          ],
+        ),
+        backgroundColor: isError ? AppColors.error : AppColors.surfaceVariant,
         behavior: SnackBarBehavior.floating,
-        margin: const EdgeInsets.all(16),
+        duration: const Duration(seconds: 2),
+        margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
     );
@@ -394,7 +354,6 @@ class _ScanProductPageState extends State<ScanProductPage> {
 
   @override
   Widget build(BuildContext context) {
-    // Wrap in PopScope to handle back button in request mode
     return PopScope(
       canPop: !_isRequestMode,
       onPopInvokedWithResult: (didPop, result) {
@@ -411,11 +370,19 @@ class _ScanProductPageState extends State<ScanProductPage> {
                 _buildRequestModeHeader()
               else
                 _buildHeader(),
+              // Scanner fills the rest
               Expanded(
                 child: Padding(
                   padding: const EdgeInsets.all(16),
-                  child: _buildScanArea(),
+                  child: _buildScanner(),
                 ),
+              ),
+              // Bottom button area
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                child: _isRequestMode
+                    ? _buildRequestModeButton()
+                    : _buildBackButton(),
               ),
             ],
           ),
@@ -530,7 +497,7 @@ class _ScanProductPageState extends State<ScanProductPage> {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(
+          const Icon(
             Icons.timer_outlined,
             color: Colors.white,
             size: 18,
@@ -538,11 +505,11 @@ class _ScanProductPageState extends State<ScanProductPage> {
           const SizedBox(width: 6),
           Text(
             '${_remainingSeconds}s',
-            style: TextStyle(
+            style: const TextStyle(
               color: Colors.white,
               fontSize: 16,
               fontWeight: FontWeight.bold,
-              fontFeatures: const [FontFeature.tabularFigures()],
+              fontFeatures: [FontFeature.tabularFigures()],
             ),
           ),
         ],
@@ -566,9 +533,16 @@ class _ScanProductPageState extends State<ScanProductPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Title row
+          // Title row with back button
           Row(
             children: [
+              IconButton(
+                icon: const Icon(Icons.arrow_back_rounded),
+                onPressed: _handleCancel,
+                tooltip: 'Back',
+                color: AppColors.textPrimary,
+              ),
+              const SizedBox(width: 4),
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
@@ -576,14 +550,14 @@ class _ScanProductPageState extends State<ScanProductPage> {
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Icon(
-                  Icons.shopping_bag_outlined,
+                  Icons.qr_code_scanner_rounded,
                   color: AppColors.primaryBlue,
                   size: 24,
                 ),
               ),
               const SizedBox(width: 12),
               Text(
-                'Find Products',
+                'Scan Product',
                 style: Theme.of(context).textTheme.titleLarge?.copyWith(
                       color: AppColors.textPrimary,
                       fontWeight: FontWeight.bold,
@@ -592,7 +566,7 @@ class _ScanProductPageState extends State<ScanProductPage> {
             ],
           ),
           const SizedBox(height: 16),
-          // Search bar - real TextField that navigates on focus/submit
+          // Search bar
           Container(
             decoration: BoxDecoration(
               color: AppColors.surfaceVariant,
@@ -603,7 +577,6 @@ class _ScanProductPageState extends State<ScanProductPage> {
               controller: _searchController,
               focusNode: _searchFocusNode,
               onTap: () {
-                // Unfocus and navigate immediately on tap
                 _searchFocusNode.unfocus();
                 _navigateToSearch();
               },
@@ -658,58 +631,28 @@ class _ScanProductPageState extends State<ScanProductPage> {
       ),
     );
   }
-
-  Widget _buildScanArea() {
-    return Column(
-      children: [
-        // Scan area - takes most of the space
-        Expanded(
-          child: AnimatedSwitcher(
-            duration: const Duration(milliseconds: 300),
-            child: _isScanning
-                ? _buildScanner()
-                : _buildScanPlaceholder(),
-          ),
-        ),
-        const SizedBox(height: 16),
-        // Scan button (different in request mode)
-        if (_isRequestMode)
-          _buildRequestModeButton()
-        else
-          _buildScanButton(),
-      ],
-    );
-  }
   
-  Widget _buildScanButton() {
+  Widget _buildBackButton() {
     return SizedBox(
       width: double.infinity,
-      child: ElevatedButton.icon(
-        icon: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 200),
-          child: Icon(
-            _isScanning ? Icons.stop_rounded : Icons.qr_code_scanner_rounded,
-            key: ValueKey(_isScanning),
-          ),
-        ),
-        label: Text(
-          _isScanning ? 'Stop Scanning' : 'Scan Barcode',
-          style: const TextStyle(
+      child: OutlinedButton.icon(
+        icon: const Icon(Icons.arrow_back_rounded),
+        label: const Text(
+          'Back',
+          style: TextStyle(
             fontSize: 16,
             fontWeight: FontWeight.w600,
           ),
         ),
-        style: ElevatedButton.styleFrom(
+        style: OutlinedButton.styleFrom(
           padding: const EdgeInsets.symmetric(vertical: 16),
-          backgroundColor: _isScanning ? AppColors.error : AppColors.primaryBlue,
-          foregroundColor: Colors.white,
+          foregroundColor: AppColors.textSecondary,
+          side: BorderSide(color: AppColors.border),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(14),
           ),
         ),
-        onPressed: _isLoadingProduct 
-            ? null 
-            : (_isScanning ? _stopScanning : _startScanning),
+        onPressed: _handleCancel,
       ),
     );
   }
@@ -741,246 +684,82 @@ class _ScanProductPageState extends State<ScanProductPage> {
 
   Widget _buildScanner() {
     return Stack(
-      key: const ValueKey('scanner'),
       children: [
+        // Scanner view - widget auto-starts with the controller
         ClipRRect(
           borderRadius: BorderRadius.circular(20),
           child: MobileScanner(
             controller: _scannerController,
             fit: BoxFit.cover,
             onDetect: _handleDetection,
+            errorBuilder: (context, error) {
+              return Container(
+                color: Colors.black,
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.camera_alt_outlined,
+                        color: AppColors.textSecondary,
+                        size: 48,
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        'Camera unavailable',
+                        style: TextStyle(
+                          color: AppColors.textSecondary,
+                          fontSize: 16,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
           ),
         ),
-        // Scan overlay
+        // Scan overlay with corner brackets
         Positioned.fill(
           child: CustomPaint(
             painter: _ScanOverlayPainter(isRequestMode: _isRequestMode),
           ),
         ),
-        // Loading overlay
-        if (_isLoadingProduct)
-          Positioned.fill(
+        // Bottom hint
+        Positioned(
+          left: 0,
+          right: 0,
+          bottom: 20,
+          child: Center(
             child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: 0.7),
+                color: Colors.black.withValues(alpha: 0.6),
                 borderRadius: BorderRadius.circular(20),
               ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  const CircularProgressIndicator(
-                    color: AppColors.primaryBlue,
-                    strokeWidth: 3,
+                  Icon(
+                    Icons.qr_code_rounded,
+                    color: Colors.white.withValues(alpha: 0.9),
+                    size: 18,
                   ),
-                  if (_loadingMessage != null) ...[
-                    const SizedBox(height: 16),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: AppColors.surface,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(
-                        _loadingMessage!,
-                        style: const TextStyle(
-                          color: AppColors.textPrimary,
-                          fontSize: 14,
-                        ),
-                      ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Point at a barcode',
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.9),
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
                     ),
-                  ],
+                  ),
                 ],
               ),
             ),
           ),
+        ),
       ],
-    );
-  }
-
-  Widget _buildScanPlaceholder() {
-    // Different placeholder for request mode
-    if (_isRequestMode) {
-      return _buildRequestModePlaceholder();
-    }
-    
-    return Container(
-      key: const ValueKey('placeholder'),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(20),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            AppColors.surfaceVariant,
-            AppColors.surface.withValues(alpha: 0.8),
-          ],
-        ),
-        border: Border.all(
-          color: AppColors.border,
-          width: 2,
-        ),
-      ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          // Animated barcode icon
-          TweenAnimationBuilder<double>(
-            tween: Tween(begin: 0.9, end: 1.0),
-            duration: const Duration(milliseconds: 1500),
-            curve: Curves.easeInOut,
-            builder: (context, scale, child) {
-              return Transform.scale(
-                scale: scale,
-                child: child,
-              );
-            },
-            child: Container(
-              padding: const EdgeInsets.all(28),
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: AppColors.primaryBlue.withValues(alpha: 0.12),
-                border: Border.all(
-                  color: AppColors.primaryBlue.withValues(alpha: 0.25),
-                  width: 2,
-                ),
-              ),
-              child: Icon(
-                Icons.qr_code_scanner_rounded,
-                size: 64,
-                color: AppColors.primaryBlue,
-              ),
-            ),
-          ),
-          const SizedBox(height: 28),
-          Text(
-            'Scan a Product',
-            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  color: AppColors.textPrimary,
-                  fontWeight: FontWeight.bold,
-                ),
-          ),
-          const SizedBox(height: 10),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 48),
-            child: Text(
-              'Point your camera at a barcode or QR code to find product details',
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: AppColors.textSecondary,
-                    height: 1.4,
-                  ),
-            ),
-          ),
-          const SizedBox(height: 24),
-          // Supported formats
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            alignment: WrapAlignment.center,
-            children: [
-              _buildFormatChip('UPC'),
-              _buildFormatChip('EAN'),
-              _buildFormatChip('QR Code'),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-  
-  Widget _buildRequestModePlaceholder() {
-    final productName = _scanRequest?.productName ?? 'product';
-    
-    return Container(
-      key: const ValueKey('request-placeholder'),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(20),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            AppColors.primaryBlue.withValues(alpha: 0.15),
-            AppColors.surface,
-          ],
-        ),
-        border: Border.all(
-          color: AppColors.primaryBlue.withValues(alpha: 0.3),
-          width: 2,
-        ),
-      ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          // Loading indicator with camera icon
-          Stack(
-            alignment: Alignment.center,
-            children: [
-              SizedBox(
-                width: 120,
-                height: 120,
-                child: CircularProgressIndicator(
-                  value: null, // Indeterminate
-                  strokeWidth: 3,
-                  color: AppColors.primaryBlue.withValues(alpha: 0.5),
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.all(24),
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: AppColors.primaryBlue.withValues(alpha: 0.15),
-                ),
-                child: Icon(
-                  Icons.camera_alt_rounded,
-                  size: 48,
-                  color: AppColors.primaryBlue,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 32),
-          Text(
-            'Starting camera...',
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                  color: AppColors.textPrimary,
-                  fontWeight: FontWeight.bold,
-                ),
-          ),
-          const SizedBox(height: 12),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 48),
-            child: Text(
-              'Get ready to scan $productName',
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: AppColors.textSecondary,
-                    height: 1.4,
-                  ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildFormatChip(String label) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: AppColors.accentYellow.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: AppColors.accentYellow.withValues(alpha: 0.3),
-        ),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          color: AppColors.accentYellow,
-          fontSize: 12,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
     );
   }
 }
