@@ -21,8 +21,13 @@ import 'chat/chat_thread_indicator.dart';
 import 'chat/model_selector_sheet.dart';
 import 'chat/thread_selector_sheet.dart';
 import 'chat/status_queue_manager.dart';
+import 'chat/tool_call_debug_modal.dart';
 import 'app_info_modal.dart';
 import '../services/agent/tool_registry.dart';
+
+/// Set to true to show tool call debug button in the UI.
+/// This allows viewing the exact tool calls and their results.
+const bool kShowToolCallDebug = true;
 
 class ChatPage extends StatefulWidget {
   /// Optional product to attach to the first message
@@ -169,6 +174,22 @@ class _ChatPageState extends State<ChatPage> {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) => const AppInfoModal(),
+    );
+  }
+
+  void _showToolCallsDebug() {
+    final toolCalls = extractToolCallsWithResults(_messages);
+    if (toolCalls.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No tool calls in this conversation')),
+      );
+      return;
+    }
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => ToolCallsListModal(toolCalls: toolCalls),
     );
   }
 
@@ -442,12 +463,33 @@ class _ChatPageState extends State<ChatPage> {
   Widget _buildChatBody() {
     return Column(
       children: [
-        // Thread indicator bar
+        // Thread indicator bar with optional debug button
         if (_chatManager.currentThread != null)
-          ChatThreadIndicator(
-            thread: _chatManager.currentThread!,
-            totalThreads: _chatManager.threads.length,
-            onTap: _showThreadSelector,
+          Row(
+            children: [
+              Expanded(
+                child: ChatThreadIndicator(
+                  thread: _chatManager.currentThread!,
+                  totalThreads: _chatManager.threads.length,
+                  onTap: _showThreadSelector,
+                ),
+              ),
+              // Tool call debug button
+              if (kShowToolCallDebug)
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: IconButton(
+                    icon: const Icon(
+                      Icons.bug_report_rounded,
+                      size: 20,
+                      color: AppColors.textSecondary,
+                    ),
+                    tooltip: 'View Tool Calls',
+                    onPressed: _showToolCallsDebug,
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ),
+            ],
           ),
         
         // Messages list

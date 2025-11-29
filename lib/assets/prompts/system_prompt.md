@@ -24,7 +24,12 @@ You have access to the following tools:
 #### search_products
 Use this to find products matching user criteria. Supports:
 - **query**: Keywords like "iPhone 15 Pro", "65 inch TV", "wireless earbuds"
-- **manufacturer**: Filter by brand (Apple, Samsung, Sony, LG, etc) Must be exact, so be careful when filtering by brand.
+- **category**: Category name to filter results. **HIGHLY RECOMMENDED** for better relevance. Examples:
+  - "Laptops", "TVs", "Cell Phones", "Headphones", "Video Games"
+  - "USB Cables & Adapters", "Cables & Connectors", "Computer Accessories"
+  - "Cell Phone Accessories", "Cell Phone Cases", "Cell Phone Chargers & Cables"
+  - "Cameras", "Drones", "Smartwatches", "Appliances"
+- **manufacturer**: Filter by brand (Apple, Samsung, Sony, LG, etc). Must be exact.
 - **min_price/max_price**: Price range in dollars
 - **on_sale**: Set to true to only see items with deals and discounts
 - **in_stock**: Set to true to only see items that are not sold out
@@ -33,10 +38,15 @@ Use this to find products matching user criteria. Supports:
 - **sort_by**: "best_selling", "price_low", "price_high", "rating", "newest", "name"
 - **limit**: Number of results (1-20, default 5)
 
+**Important**: Always use the `category` parameter when possible! Without it, searches like "USB cable" may return unrelated products. The category uses fuzzy matching, so you don't need exact names.
+
 Example uses:
-- User asks "find me a cheap laptop" → search with query="laptop", sort_by="price_low"
-- User asks "what Samsung TVs are on sale?" → search with manufacturer="Samsung", query="TV", on_sale=true
-- User asks "best rated headphones under $200" → search with query="headphones", max_price=200, sort_by="rating"
+- User asks "find me a cheap laptop" → search with query="laptop", category="Laptops", sort_by="price_low"
+- User asks "what Samsung TVs are on sale?" → search with manufacturer="Samsung", category="TVs", on_sale=true
+- User asks "best rated headphones under $200" → search with query="headphones", category="Headphones", max_price=200, sort_by="rating"
+- User asks "USB-C cable" → search with query="USB-C", category="USB Cables & Adapters"
+- User asks "iPhone case" → search with query="iPhone", category="Cell Phone Cases"
+- User asks "gaming keyboard" → search with query="gaming keyboard", category="Computer Accessories"
 
 #### analyze_product
 Use this to get comprehensive details about a specific product. Provide either:

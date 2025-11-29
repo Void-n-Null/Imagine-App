@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'category_finder.dart';
 import 'models/search_response.dart';
 
 /// Sorting options for product search results.
@@ -293,6 +294,44 @@ class ProductSearchBuilder {
     return this;
   }
 
+  /// Filters by category name using fuzzy matching.
+  ///
+  /// Uses [CategoryFinder] to resolve the category name to an ID.
+  /// Returns this builder unchanged if no matching category is found.
+  ///
+  /// Example:
+  /// ```dart
+  /// builder.inCategoryByName('USB Cables')  // Resolves to abcat0515013
+  /// builder.inCategoryByName('laptops')     // Resolves to abcat0502000
+  /// ```
+  ProductSearchBuilder inCategoryByName(String categoryName) {
+    if (categoryName.trim().isEmpty) return this;
+
+    final finder = CategoryFinder();
+    final match = finder.findCategory(categoryName);
+    if (match != null) {
+      _filters.add('categoryPath.id=${match.category.id}');
+    }
+    return this;
+  }
+
+  /// Filters by category name, returning the matched category info.
+  ///
+  /// This variant returns information about the matched category,
+  /// useful for displaying to users what category was selected.
+  ///
+  /// Returns null if no matching category is found.
+  CategoryMatch? inCategoryByNameWithInfo(String categoryName) {
+    if (categoryName.trim().isEmpty) return null;
+
+    final finder = CategoryFinder();
+    final match = finder.findCategory(categoryName);
+    if (match != null) {
+      _filters.add('categoryPath.id=${match.category.id}');
+    }
+    return match;
+  }
+
   /// Filters by manufacturer name (exact match).
   ProductSearchBuilder byManufacturer(String manufacturer) {
     _filters.add('manufacturer="$manufacturer"');
@@ -425,12 +464,6 @@ class ProductSearchBuilder {
     return this;
   }
 
-  /// Filters to exclude marketplace products.
-  ProductSearchBuilder excludeMarketplace() {
-    _filters.add('marketplace=false');
-    return this;
-  }
-
   /// Filters to only show active products.
   ProductSearchBuilder active() {
     _filters.add('active=true');
@@ -456,11 +489,30 @@ class ProductSearchBuilder {
     _filters.add('type!=BlackTie');
     // Exclude Geek Squad Warranties category and all subcategories
     _filters.add('categoryPath.id!=pcmcat1500564963044');
-    // Exclude Services parent category
+    // Exclude Services parent category (catches memberships too)
     _filters.add('categoryPath.id!=pcmcat1528819595254');
     // Exclude by manufacturer as backup
     _filters.add('manufacturer!="AppleCare"');
     _filters.add('manufacturer!="Geek Squad®"');
+    return this;
+  }
+
+  /// Excludes My Best Buy memberships (Total, Plus, etc.).
+  ///
+  /// Filters out Best Buy membership products:
+  /// - My Best Buy Total™ Monthly/Yearly Membership
+  /// - My Best Buy Plus™ Yearly Membership
+  ///
+  /// Note: Most memberships use type=BlackTie (caught by excludeProtectionPlans)
+  /// but some yearly memberships use type=HardGood in the Services category.
+  ProductSearchBuilder excludeMemberships() {
+    // Exclude by manufacturer names used for memberships
+    _filters.add('manufacturer!="My Best Buy Total™"');
+    _filters.add('manufacturer!="My Best Buy Plus™"');
+    // Services category catches HardGood memberships
+    _filters.add('categoryPath.id!=pcmcat1528819595254');
+    // Installation/Support services subcategory
+    _filters.add('categoryPath.id!=pcmcat1519317780628');
     return this;
   }
 
@@ -511,10 +563,10 @@ class ProductSearchBuilder {
 
   /// Applies all common exclusions for cleaner search results.
   ///
-  /// Excludes: protection plans, gift cards, digital content.
-  /// Note: excludeMarketplace() is NOT included as it can incorrectly filter products.
+  /// Excludes: protection plans, memberships, gift cards, digital content.
   ProductSearchBuilder excludeCommonNoise() {
     excludeProtectionPlans();
+    excludeMemberships();
     excludeGiftCards();
     excludeDigitalContent();
     return this;

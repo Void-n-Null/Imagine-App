@@ -38,10 +38,10 @@ class _SearchDebugPageState extends State<SearchDebugPage> {
   bool _onSaleOnly = false;
   bool _freeShippingOnly = false;
   bool _inStockOnly = false;
-  bool _excludeMarketplace = false;
 
   // Blocklist configuration
   bool _blockProtectionPlans = true;
+  bool _blockMemberships = true;
   bool _blockGiftCards = true;
   bool _blockDigitalContent = false;
   bool _blockAccessories = false;
@@ -103,10 +103,10 @@ class _SearchDebugPageState extends State<SearchDebugPage> {
       if (_onSaleOnly) builder = builder.onSale();
       if (_freeShippingOnly) builder = builder.freeShipping();
       if (_inStockOnly) builder = builder.availableOnline();
-      if (_excludeMarketplace) builder = builder.excludeMarketplace();
 
       // Apply blocklist
       if (_blockProtectionPlans) builder = builder.excludeProtectionPlans();
+      if (_blockMemberships) builder = builder.excludeMemberships();
       if (_blockGiftCards) builder = builder.excludeGiftCards();
       if (_blockDigitalContent) builder = builder.excludeDigitalContent();
       if (_blockAccessories) builder = builder.excludeAccessories();
@@ -225,10 +225,10 @@ class _SearchDebugPageState extends State<SearchDebugPage> {
     buffer.writeln('  On Sale: $_onSaleOnly');
     buffer.writeln('  Free Shipping: $_freeShippingOnly');
     buffer.writeln('  In Stock: $_inStockOnly');
-    buffer.writeln('  Exclude Marketplace: $_excludeMarketplace');
     buffer.writeln();
     buffer.writeln('Blocklist:');
     buffer.writeln('  Protection Plans: $_blockProtectionPlans');
+    buffer.writeln('  Memberships: $_blockMemberships');
     buffer.writeln('  Gift Cards: $_blockGiftCards');
     buffer.writeln('  Digital Content: $_blockDigitalContent');
     buffer.writeln('  Accessories: $_blockAccessories');
@@ -477,7 +477,6 @@ class _SearchDebugPageState extends State<SearchDebugPage> {
               _buildFilterChip('On Sale', _onSaleOnly, (v) => setState(() => _onSaleOnly = v)),
               _buildFilterChip('Free Shipping', _freeShippingOnly, (v) => setState(() => _freeShippingOnly = v)),
               _buildFilterChip('In Stock', _inStockOnly, (v) => setState(() => _inStockOnly = v)),
-              _buildFilterChip('Exclude Marketplace', _excludeMarketplace, (v) => setState(() => _excludeMarketplace = v)),
             ],
           ),
         ],
@@ -504,6 +503,7 @@ class _SearchDebugPageState extends State<SearchDebugPage> {
             runSpacing: 8,
             children: [
               _buildBlockChip('Protection Plans', _blockProtectionPlans, (v) => setState(() => _blockProtectionPlans = v)),
+              _buildBlockChip('Memberships', _blockMemberships, (v) => setState(() => _blockMemberships = v)),
               _buildBlockChip('Gift Cards', _blockGiftCards, (v) => setState(() => _blockGiftCards = v)),
               _buildBlockChip('Digital Content', _blockDigitalContent, (v) => setState(() => _blockDigitalContent = v)),
               _buildBlockChip('Accessories', _blockAccessories, (v) => setState(() => _blockAccessories = v)),

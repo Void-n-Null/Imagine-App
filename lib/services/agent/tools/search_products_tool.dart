@@ -6,9 +6,11 @@ import '../../../config/api_keys.dart';
 /// Tool for searching Best Buy products with various filters.
 class SearchProductsTool extends Tool {
   final BestBuyClient _client;
+  final CategoryFinder _categoryFinder;
   
   SearchProductsTool({BestBuyClient? client}) 
-      : _client = client ?? BestBuyClient(apiKey: ApiKeys.bestBuy);
+      : _client = client ?? BestBuyClient(apiKey: ApiKeys.bestBuy),
+        _categoryFinder = CategoryFinder();
   
   @override
   String get name => 'search_products';
@@ -20,7 +22,11 @@ class SearchProductsTool extends Tool {
   String get description => '''Search for products in the Best Buy catalog.
 Returns a list of matching products with basic info (SKU, name, price, availability).
 Use this to find products by keyword, category, price range, or other criteria.
-After finding products, you can show them to the user using [Product(SKU)] syntax.''';
+After finding products, you can show them to the user using [Product(SKU)] syntax.
+
+IMPORTANT: For better search results, use the "category" parameter to narrow down results.
+Common categories: "Laptops", "TVs", "Cell Phones", "Headphones", "USB Cables", 
+"Computer Accessories", "Cell Phone Accessories", "Video Games", "Cameras", "Appliances".''';
   
   @override
   Map<String, dynamic> get parameters => {
@@ -30,9 +36,13 @@ After finding products, you can show them to the user using [Product(SKU)] synta
         'type': 'string',
         'description': 'Search keywords (e.g., "iPhone 15", "4K TV", "gaming laptop"). Required unless searching by category.',
       },
+      'category': {
+        'type': 'string',
+        'description': 'Category name to filter results (e.g., "Laptops", "TVs", "USB Cables", "Cell Phone Accessories"). Uses fuzzy matching to find the best category. HIGHLY RECOMMENDED for better results.',
+      },
       'category_id': {
         'type': 'string',
-        'description': 'Best Buy category ID to filter results (e.g., "abcat0502000" for laptops). Optional.',
+        'description': 'Best Buy category ID to filter results (e.g., "abcat0502000" for laptops). Use "category" parameter instead for easier filtering.',
       },
       'manufacturer': {
         'type': 'string',
@@ -79,6 +89,7 @@ After finding products, you can show them to the user using [Product(SKU)] synta
   Future<String> execute(Map<String, dynamic> args) async {
     try {
       var builder = _client.products();
+      String? matchedCategoryName;
       
       // Apply search query
       final query = args['query'] as String?;
@@ -86,10 +97,25 @@ After finding products, you can show them to the user using [Product(SKU)] synta
         builder = builder.search(query);
       }
       
-      // Apply category filter
+      // Apply category filter by name (preferred)
+      final categoryName = args['category'] as String?;
+      if (categoryName != null && categoryName.isNotEmpty) {
+        final match = _categoryFinder.findCategory(categoryName);
+        if (match != null) {
+          builder = builder.inCategory(match.category.id);
+          matchedCategoryName = match.category.displayName;
+        }
+      }
+      
+      // Apply category filter by ID (fallback)
       final categoryId = args['category_id'] as String?;
-      if (categoryId != null && categoryId.isNotEmpty) {
+      if (categoryId != null && categoryId.isNotEmpty && matchedCategoryName == null) {
         builder = builder.inCategory(categoryId);
+        // Try to get the category name for display
+        final entry = _categoryFinder.getCategoryById(categoryId);
+        if (entry != null) {
+          matchedCategoryName = entry.displayName;
+        }
       }
       
       // Apply manufacturer filter
@@ -149,12 +175,18 @@ After finding products, you can show them to the user using [Product(SKU)] synta
       final response = await builder.execute();
       
       if (response.products.isEmpty) {
-        return 'No products found matching your criteria.';
+        final categoryInfo = matchedCategoryName != null 
+            ? ' in category "$matchedCategoryName"' 
+            : '';
+        return 'No products found matching your criteria$categoryInfo.';
       }
       
       // Format results
       final buffer = StringBuffer();
       buffer.writeln('Found ${response.total} products (showing ${response.products.length}):');
+      if (matchedCategoryName != null) {
+        buffer.writeln('Category: $matchedCategoryName');
+      }
       buffer.writeln();
       
       for (final product in response.products) {

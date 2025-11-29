@@ -48,6 +48,7 @@ class _ProductSearchPageState extends State<ProductSearchPage> {
   double? _maxPrice;
   double? _minRating;
   ProductCondition? _condition;
+  CategoryEntry? _selectedCategory;
 
   // Debounce timer
   Timer? _debounceTimer;
@@ -141,6 +142,11 @@ class _ProductSearchPageState extends State<ProductSearchPage> {
       // Exclude AppleCare and protection plans
       builder = builder.filter('manufacturer!="AppleCare"');
 
+      // Apply category filter
+      if (_selectedCategory != null) {
+        builder = builder.inCategory(_selectedCategory!.id);
+      }
+
       // Apply filters
       if (_onSaleOnly) builder = builder.onSale();
       if (_freeShippingOnly) builder = builder.freeShipping();
@@ -219,6 +225,7 @@ class _ProductSearchPageState extends State<ProductSearchPage> {
         maxPrice: _maxPrice,
         minRating: _minRating,
         condition: _condition,
+        selectedCategory: _selectedCategory,
         onApply: (filters) {
           setState(() {
             _sortBy = filters.sortBy;
@@ -229,6 +236,7 @@ class _ProductSearchPageState extends State<ProductSearchPage> {
             _maxPrice = filters.maxPrice;
             _minRating = filters.minRating;
             _condition = filters.condition;
+            _selectedCategory = filters.selectedCategory;
           });
           if (_searchController.text.trim().isNotEmpty) {
             _searchProducts(resetPage: true);
@@ -277,6 +285,7 @@ class _ProductSearchPageState extends State<ProductSearchPage> {
     if (_minPrice != null || _maxPrice != null) count++;
     if (_minRating != null) count++;
     if (_condition != null) count++;
+    if (_selectedCategory != null) count++;
     return count;
   }
 
@@ -1097,6 +1106,7 @@ class _FilterParams {
   final double? maxPrice;
   final double? minRating;
   final ProductCondition? condition;
+  final CategoryEntry? selectedCategory;
 
   _FilterParams({
     required this.sortBy,
@@ -1107,6 +1117,7 @@ class _FilterParams {
     this.maxPrice,
     this.minRating,
     this.condition,
+    this.selectedCategory,
   });
 }
 
@@ -1121,6 +1132,7 @@ class _FilterSheet extends StatefulWidget {
     this.maxPrice,
     this.minRating,
     this.condition,
+    this.selectedCategory,
     required this.onApply,
   });
 
@@ -1132,6 +1144,7 @@ class _FilterSheet extends StatefulWidget {
   final double? maxPrice;
   final double? minRating;
   final ProductCondition? condition;
+  final CategoryEntry? selectedCategory;
   final void Function(_FilterParams) onApply;
 
   @override
@@ -1147,6 +1160,7 @@ class _FilterSheetState extends State<_FilterSheet> {
   late TextEditingController _maxPriceController;
   double? _minRating;
   ProductCondition? _condition;
+  CategoryEntry? _selectedCategory;
 
   @override
   void initState() {
@@ -1163,6 +1177,7 @@ class _FilterSheetState extends State<_FilterSheet> {
     );
     _minRating = widget.minRating;
     _condition = widget.condition;
+    _selectedCategory = widget.selectedCategory;
   }
 
   @override
@@ -1185,6 +1200,7 @@ class _FilterSheetState extends State<_FilterSheet> {
       maxPrice: maxPrice,
       minRating: _minRating,
       condition: _condition,
+      selectedCategory: _selectedCategory,
     ));
     Navigator.of(context).pop();
   }
@@ -1199,6 +1215,7 @@ class _FilterSheetState extends State<_FilterSheet> {
       _maxPriceController.clear();
       _minRating = null;
       _condition = null;
+      _selectedCategory = null;
     });
   }
 
@@ -1289,6 +1306,28 @@ class _FilterSheetState extends State<_FilterSheet> {
                       );
                     }).toList(),
                   ),
+                  const SizedBox(height: 24),
+
+                  // Category filter
+                  const Text(
+                    'Category',
+                    style: TextStyle(
+                      color: AppColors.textSecondary,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Filter by category for better results',
+                    style: TextStyle(
+                      color: AppColors.textSecondary.withValues(alpha: 0.7),
+                      fontSize: 11,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  _buildCategoryPicker(),
                   const SizedBox(height: 24),
 
                   // Condition filter
@@ -1619,6 +1658,85 @@ class _FilterSheetState extends State<_FilterSheet> {
       ProductSort.releaseDateAsc => 'Oldest',
       ProductSort.skuAsc => 'SKU',
     };
+  }
+
+  Widget _buildCategoryPicker() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Selected category chip (if any)
+        if (_selectedCategory != null)
+          Container(
+            margin: const EdgeInsets.only(bottom: 12),
+            child: Chip(
+              label: Text(_selectedCategory!.displayName),
+              labelStyle: const TextStyle(
+                color: AppColors.background,
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+              ),
+              backgroundColor: AppColors.primaryBlue,
+              deleteIcon: const Icon(
+                Icons.close,
+                size: 16,
+                color: AppColors.background,
+              ),
+              onDeleted: () => setState(() => _selectedCategory = null),
+              side: BorderSide.none,
+            ),
+          ),
+        // Category chips
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            // "All Categories" option
+            _buildCategoryChip(null, 'All'),
+            // Top-level categories
+            for (final category in CategoryFinder.topLevelCategories.take(8))
+              _buildCategoryChip(category, category.name),
+            // Popular subcategories
+            _buildCategoryChip(
+              const CategoryEntry(id: 'abcat0502000', name: 'Laptops', parentName: 'Computers'),
+              'Laptops',
+            ),
+            _buildCategoryChip(
+              const CategoryEntry(id: 'abcat0515013', name: 'USB Cables & Adapters', parentName: 'Cables & Connectors'),
+              'USB Cables',
+            ),
+            _buildCategoryChip(
+              const CategoryEntry(id: 'abcat0811002', name: 'Cell Phone Accessories', parentName: 'Cell Phones'),
+              'Phone Accessories',
+            ),
+            _buildCategoryChip(
+              const CategoryEntry(id: 'pcmcat321000050003', name: 'Smartwatches & Accessories', parentName: 'Cell Phones'),
+              'Smartwatches',
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCategoryChip(CategoryEntry? category, String label) {
+    final isSelected = _selectedCategory?.id == category?.id;
+    return ChoiceChip(
+      label: Text(label),
+      selected: isSelected,
+      onSelected: (selected) {
+        setState(() => _selectedCategory = selected ? category : null);
+      },
+      labelStyle: TextStyle(
+        color: isSelected ? AppColors.background : AppColors.textPrimary,
+        fontSize: 11,
+      ),
+      backgroundColor: AppColors.surfaceVariant,
+      selectedColor: AppColors.primaryBlue,
+      side: BorderSide(
+        color: isSelected ? AppColors.primaryBlue : AppColors.border,
+      ),
+      visualDensity: VisualDensity.compact,
+    );
   }
 
   Widget _buildConditionChip(String label, ProductCondition? condition) {
