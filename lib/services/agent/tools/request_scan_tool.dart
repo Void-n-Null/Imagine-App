@@ -51,11 +51,13 @@ is cancelled, or the product is not found.''';
     final productName = args['product_name'] as String? ?? 'the product';
     
     try {
-      // Request the scan and wait for result with timeout
+      // Request the scan and wait for result
+      // We use a long safety timeout (60s) here to handle cases where the UI fails to open.
+      // The actual user interaction timeout (20s) is handled by the ScanProductPage.
       final result = await _scanService
           .requestScan(productName)
           .timeout(
-            const Duration(seconds: 20),
+            const Duration(seconds: 60),
             onTimeout: () {
               _scanService.completeTimeout();
               return ScanResult.timeout();

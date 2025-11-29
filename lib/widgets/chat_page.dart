@@ -126,10 +126,13 @@ class _ChatPageState extends State<ChatPage> {
   
   /// Navigate to scanner page for an AI-requested scan
   void _navigateToScannerForRequest() {
-    final request = _scanRequestService.activeRequest;
-    if (request == null) return;
-    
     _isNavigatingToScan = true;
+    
+    final request = _scanRequestService.activeRequest;
+    if (request == null) {
+      _isNavigatingToScan = false;
+      return;
+    }
     
     Navigator.of(context).push(
       MaterialPageRoute(

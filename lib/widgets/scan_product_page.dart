@@ -73,7 +73,8 @@ class _ScanProductPageState extends State<ScanProductPage> {
       final args = ModalRoute.of(context)?.settings.arguments;
       if (args is ScanRequestArgs) {
         _scanRequest = args.request;
-        _remainingSeconds = args.request.remainingTime.inSeconds;
+        // Reset timer to full duration when page opens, ignoring navigation delay
+        _remainingSeconds = args.request.timeout.inSeconds;
         _startCountdown();
       }
     }
