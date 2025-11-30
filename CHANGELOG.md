@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.2.1] - 2025-11-30
+
+### Added
+- **In-App Update System:** The app now automatically checks for updates from GitHub Releases on startup.
+- **Update Modal:** A new dialog shows release notes (Markdown supported), version comparison, and options to update, skip, or silence reminders.
+- **Platform-Aware Updates:** Direct APK download and installation for Android, with appropriate fallbacks for other platforms.
+- **Update Preferences:** Added settings to remember skipped versions ("No Thanks") and silenced reminders ("Don't remind me").
+
 ## [1.2.0] - 2025-11-30
 
 ### Added

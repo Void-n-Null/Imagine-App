@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'services/storage/storage.dart';
+import 'services/update/update.dart';
+import 'widgets/update_modal.dart';
 import 'theme/app_colors.dart';
 import 'widgets/chat_page.dart';
 import 'widgets/splash_screen.dart';
@@ -119,6 +121,41 @@ class AppWithSplash extends StatefulWidget {
 
 class _AppWithSplashState extends State<AppWithSplash> {
   bool _showSplash = true;
+  bool _hasCheckedForUpdate = false;
+
+  Future<void> _checkForUpdate() async {
+    if (_hasCheckedForUpdate) return;
+    _hasCheckedForUpdate = true;
+
+    try {
+      final updateService = UpdateService();
+      final release = await updateService.checkForUpdate();
+
+      if (release != null && mounted) {
+        final action = await UpdateModal.show(
+          context,
+          release,
+          updateService.currentVersion ?? 'Unknown',
+        );
+
+        if (action != null) {
+          switch (action) {
+            case UpdateAction.update:
+              await updateService.initiateUpdate(release);
+              break;
+            case UpdateAction.skip:
+              await updateService.skipVersion(release.version);
+              break;
+            case UpdateAction.dontRemind:
+              await updateService.disableUpdateReminders();
+              break;
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('Error checking for updates: $e');
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -131,6 +168,8 @@ class _AppWithSplashState extends State<AppWithSplash> {
               setState(() {
                 _showSplash = false;
               });
+              // Check for updates after splash completes
+              _checkForUpdate();
             },
           ),
       ],

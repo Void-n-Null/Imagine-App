@@ -12,17 +12,23 @@ class SettingsService {
   static const String _keySelectedModel = 'selected_model';
   static const String _keyLastActiveThreadId = 'last_active_thread_id';
   static const String _keyThreadOrder = 'thread_order';
+  static const String _keySkippedUpdateVersion = 'skipped_update_version';
+  static const String _keyDontRemindMeForUpdates = 'dont_remind_me_for_updates';
   
   // In-memory cache for frequently accessed settings
   String? _selectedModelCache;
   String? _lastActiveThreadIdCache;
   List<String>? _threadOrderCache;
+  String? _skippedUpdateVersionCache;
+  bool? _dontRemindMeForUpdatesCache;
   
   SettingsService._(this._prefs) {
     // Initialize cache from stored values
     _selectedModelCache = _prefs.getString(_keySelectedModel);
     _lastActiveThreadIdCache = _prefs.getString(_keyLastActiveThreadId);
     _threadOrderCache = _prefs.getStringList(_keyThreadOrder);
+    _skippedUpdateVersionCache = _prefs.getString(_keySkippedUpdateVersion);
+    _dontRemindMeForUpdatesCache = _prefs.getBool(_keyDontRemindMeForUpdates);
   }
   
   /// Initialize the settings service. Must be called before accessing instance.
@@ -85,6 +91,30 @@ class SettingsService {
   /// Move a thread to the front (most recent)
   Future<void> moveThreadToFront(String threadId) async {
     await addThreadToOrder(threadId);
+  }
+  
+  // ============ Update Preferences ============
+  
+  /// Get the version that the user chose to skip
+  String? get skippedUpdateVersion => _skippedUpdateVersionCache;
+  
+  /// Set the version to skip (user chose "No Thanks")
+  Future<void> setSkippedUpdateVersion(String? version) async {
+    _skippedUpdateVersionCache = version;
+    if (version != null) {
+      await _prefs.setString(_keySkippedUpdateVersion, version);
+    } else {
+      await _prefs.remove(_keySkippedUpdateVersion);
+    }
+  }
+  
+  /// Check if user has disabled update reminders entirely
+  bool get dontRemindMeForUpdates => _dontRemindMeForUpdatesCache ?? false;
+  
+  /// Set whether to remind user about updates
+  Future<void> setDontRemindMeForUpdates(bool value) async {
+    _dontRemindMeForUpdatesCache = value;
+    await _prefs.setBool(_keyDontRemindMeForUpdates, value);
   }
 }
 
