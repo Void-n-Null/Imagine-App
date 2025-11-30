@@ -1,6 +1,7 @@
 /// Storage services for persistence.
 library;
 
+export 'cart_service.dart';
 export 'chat_manager.dart';
 export 'chat_storage_service.dart';
 export 'chat_thread.dart';

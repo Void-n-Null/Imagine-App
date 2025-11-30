@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../services/storage/cart_service.dart';
 import '../../theme/app_colors.dart';
 
 /// Builder function for the chat page AppBar with polished styling
@@ -10,8 +11,7 @@ PreferredSizeWidget buildChatAppBar({
   required VoidCallback onThreadSelectorTap,
   required VoidCallback onNewChat,
   required VoidCallback onScanProduct,
-  required VoidCallback onConnectOpenRouter,
-  required VoidCallback onDisconnectOpenRouter,
+  required VoidCallback onOpenCart,
   required VoidCallback onShowInfo,
 }) {
   return AppBar(
@@ -81,18 +81,58 @@ PreferredSizeWidget buildChatAppBar({
         tooltip: 'Scan Product',
         onPressed: onScanProduct,
       ),
-      IconButton(
-        icon: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 200),
-          child: Icon(
-            isAuthenticated ? Icons.cloud_done_rounded : Icons.cloud_off_rounded,
-            key: ValueKey(isAuthenticated),
-            color: isAuthenticated ? AppColors.success : AppColors.textSecondary,
-          ),
-        ),
-        tooltip: isAuthenticated ? 'Connected to OpenRouter' : 'Connect OpenRouter',
-        onPressed: isAuthenticated ? onDisconnectOpenRouter : onConnectOpenRouter,
-      ),
+      // Cart button with badge
+      _CartIconButton(onPressed: onOpenCart),
     ],
   );
+}
+
+/// Cart icon button with item count badge
+class _CartIconButton extends StatefulWidget {
+  final VoidCallback onPressed;
+
+  const _CartIconButton({required this.onPressed});
+
+  @override
+  State<_CartIconButton> createState() => _CartIconButtonState();
+}
+
+class _CartIconButtonState extends State<_CartIconButton> {
+  final CartService _cart = CartService.instance;
+
+  @override
+  void initState() {
+    super.initState();
+    _cart.addListener(_onCartChanged);
+  }
+
+  @override
+  void dispose() {
+    _cart.removeListener(_onCartChanged);
+    super.dispose();
+  }
+
+  void _onCartChanged() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final itemCount = _cart.itemCount;
+    
+    return IconButton(
+      icon: Badge(
+        isLabelVisible: itemCount > 0,
+        label: Text(
+          itemCount > 99 ? '99+' : itemCount.toString(),
+          style: const TextStyle(fontSize: 10),
+        ),
+        backgroundColor: AppColors.accentYellow,
+        textColor: AppColors.background,
+        child: const Icon(Icons.shopping_cart_outlined),
+      ),
+      tooltip: 'Shopping Cart',
+      onPressed: widget.onPressed,
+    );
+  }
 }

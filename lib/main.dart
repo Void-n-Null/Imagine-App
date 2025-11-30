@@ -21,6 +21,7 @@ void main() async {
   await SettingsService.initialize();
   await ChatStorageService.initialize();
   await ChatManager.initialize();
+  await CartService.initialize();
   
   runApp(const ImagineApp());
 }

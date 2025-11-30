@@ -1,16 +1,13 @@
 import 'package:flutter/material.dart';
 import '../config/api_keys.dart';
 import '../services/agent/agent.dart';
-import '../services/agent/chat_message.dart';
-import '../services/agent/prompt_loader.dart';
-import '../services/agent/scan_request_service.dart';
-import '../services/agent/tools/request_scan_tool.dart';
 import '../services/bestbuy/bestbuy.dart';
 import '../services/openrouter/openrouter_auth_page.dart';
 import '../services/openrouter/openrouter_auth_service.dart';
 import '../services/openrouter/openrouter_models.dart';
 import '../services/storage/storage.dart';
 import '../theme/app_colors.dart';
+import 'cart_page.dart';
 import 'scan_product_page.dart';
 import 'chat/chat_agent_manager.dart';
 import 'chat/chat_app_bar.dart';
@@ -25,7 +22,6 @@ import 'chat/thread_selector_sheet.dart';
 import 'chat/status_queue_manager.dart';
 import 'chat/tool_call_debug_modal.dart';
 import 'app_info_modal.dart';
-import '../services/agent/tool_registry.dart';
 
 /// Set to true to show tool call debug button in the UI.
 /// This allows viewing the exact tool calls and their results.
@@ -186,6 +182,12 @@ class _ChatPageState extends State<ChatPage> {
     registry.register(SearchProductsTool(client: _bestBuyClient));
     registry.register(AnalyzeProductTool(client: _bestBuyClient));
     registry.register(RequestScanTool());
+    
+    // Cart tools
+    registry.register(AddToCartTool(client: _bestBuyClient));
+    registry.register(RemoveFromCartTool());
+    registry.register(ClearCartTool());
+    registry.register(ViewCartTool());
   }
   
 
@@ -291,6 +293,15 @@ class _ChatPageState extends State<ChatPage> {
         onDeleteThread: (threadId) async {
           await _chatManager.deleteThread(threadId);
         },
+        isAuthenticated: _isAuthenticated,
+        onConnectOpenRouter: () {
+          Navigator.pop(context);
+          _connectOpenRouter();
+        },
+        onDisconnectOpenRouter: () {
+          Navigator.pop(context);
+          _disconnectOpenRouter();
+        },
       ),
     );
   }
@@ -326,6 +337,14 @@ class _ChatPageState extends State<ChatPage> {
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (context) => const ScanProductPage(),
+      ),
+    );
+  }
+
+  void _navigateToCart() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => const CartPage(),
       ),
     );
   }
@@ -446,8 +465,7 @@ class _ChatPageState extends State<ChatPage> {
           );
         },
         onScanProduct: _navigateToScanner,
-        onConnectOpenRouter: _connectOpenRouter,
-        onDisconnectOpenRouter: _disconnectOpenRouter,
+        onOpenCart: _navigateToCart,
         onShowInfo: _showInfoModal,
       ),
       body: _isLandingState
@@ -472,7 +490,7 @@ class _ChatPageState extends State<ChatPage> {
       scrolledUnderElevation: 0,
       leading: IconButton(
         icon: const Icon(Icons.menu_rounded),
-        tooltip: 'Chat Threads',
+        tooltip: 'Menu',
         onPressed: _showThreadSelector,
       ),
       actions: [
@@ -486,18 +504,8 @@ class _ChatPageState extends State<ChatPage> {
           tooltip: 'Scan Product',
           onPressed: _navigateToScanner,
         ),
-        IconButton(
-          icon: AnimatedSwitcher(
-            duration: const Duration(milliseconds: 200),
-            child: Icon(
-              _isAuthenticated ? Icons.cloud_done_rounded : Icons.cloud_off_rounded,
-              key: ValueKey(_isAuthenticated),
-              color: _isAuthenticated ? AppColors.success : AppColors.textSecondary,
-            ),
-          ),
-          tooltip: _isAuthenticated ? 'Connected to OpenRouter' : 'Connect OpenRouter',
-          onPressed: _isAuthenticated ? _disconnectOpenRouter : _connectOpenRouter,
-        ),
+        // Cart button with badge
+        _LandingCartButton(onPressed: _navigateToCart),
       ],
     );
   }
@@ -574,6 +582,56 @@ class _ChatPageState extends State<ChatPage> {
           onSendMessage: _sendMessage,
         ),
       ],
+    );
+  }
+}
+
+/// Cart icon button with item count badge for landing page
+class _LandingCartButton extends StatefulWidget {
+  final VoidCallback onPressed;
+
+  const _LandingCartButton({required this.onPressed});
+
+  @override
+  State<_LandingCartButton> createState() => _LandingCartButtonState();
+}
+
+class _LandingCartButtonState extends State<_LandingCartButton> {
+  final CartService _cart = CartService.instance;
+
+  @override
+  void initState() {
+    super.initState();
+    _cart.addListener(_onCartChanged);
+  }
+
+  @override
+  void dispose() {
+    _cart.removeListener(_onCartChanged);
+    super.dispose();
+  }
+
+  void _onCartChanged() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final itemCount = _cart.itemCount;
+    
+    return IconButton(
+      icon: Badge(
+        isLabelVisible: itemCount > 0,
+        label: Text(
+          itemCount > 99 ? '99+' : itemCount.toString(),
+          style: const TextStyle(fontSize: 10),
+        ),
+        backgroundColor: AppColors.accentYellow,
+        textColor: AppColors.background,
+        child: const Icon(Icons.shopping_cart_outlined),
+      ),
+      tooltip: 'Shopping Cart',
+      onPressed: widget.onPressed,
     );
   }
 }

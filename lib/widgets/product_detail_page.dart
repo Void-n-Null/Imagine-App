@@ -33,19 +33,64 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
   String? _storeAvailabilityError;
   String? _userPostalCode;
 
+  // Cart state
+  final CartService _cart = CartService.instance;
+  bool _isInCart = false;
+
   BestBuyProduct get product => widget.product;
 
   @override
   void initState() {
     super.initState();
+    _isInCart = _cart.containsSku(product.sku);
+    _cart.addListener(_onCartChanged);
+    
     // Auto-fetch store availability if product is marked as in-store available
     if (product.inStoreAvailability == true) {
       _fetchStoreAvailability();
     }
   }
 
+  @override
+  void dispose() {
+    _cart.removeListener(_onCartChanged);
+    super.dispose();
+  }
+
+  void _onCartChanged() {
+    if (mounted) {
+      setState(() {
+        _isInCart = _cart.containsSku(product.sku);
+      });
+    }
+  }
+
+  Future<void> _toggleCart() async {
+    if (_isInCart) {
+      await _cart.removeFromCart(product.sku);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Removed from cart'),
+          action: SnackBarAction(
+            label: 'Undo',
+            onPressed: () => _cart.addToCart(product),
+          ),
+        ),
+      );
+    } else {
+      await _cart.addToCart(product);
+      if (!mounted) return;
+      await HapticFeedback.mediumImpact();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Added to cart')),
+      );
+    }
+  }
+
   Future<void> _fetchStoreAvailability({bool preferGps = true}) async {
     if (_loadingStoreAvailability) return;
+    if (!mounted) return;
 
     setState(() {
       _loadingStoreAvailability = true;
@@ -59,6 +104,8 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
       if (preferGps || _userPostalCode == null || _userPostalCode!.isEmpty) {
         position = await _getUserLocation();
       }
+      
+      if (!mounted) return;
 
       final client = BestBuyClient(apiKey: ApiKeys.bestBuy);
       try {
@@ -76,7 +123,7 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
             );
             derivedPostalCode = placemarks.firstOrNull?.postalCode;
             // Update the UI state with the detected ZIP so the user sees it
-            if (derivedPostalCode != null && derivedPostalCode.isNotEmpty) {
+            if (mounted && derivedPostalCode != null && derivedPostalCode.isNotEmpty) {
               setState(() {
                 _userPostalCode = derivedPostalCode;
               });
@@ -106,6 +153,7 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
           );
         } else {
           // No location available - prompt user for postal code
+          if (!mounted) return;
           setState(() {
             _loadingStoreAvailability = false;
             _storeAvailabilityError = 'location_needed';
@@ -113,6 +161,7 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
           return;
         }
 
+        if (!mounted) return;
         setState(() {
           _storeAvailability = response;
           _loadingStoreAvailability = false;
@@ -121,11 +170,13 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
         client.close();
       }
     } on BestBuyException catch (e) {
+      if (!mounted) return;
       setState(() {
         _loadingStoreAvailability = false;
         _storeAvailabilityError = e.message;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _loadingStoreAvailability = false;
         _storeAvailabilityError = 'Failed to check store availability';
@@ -2773,35 +2824,66 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
   }
 
   Widget _buildActionButtons(BuildContext context) {
-    return Row(
+    return Column(
       children: [
-        // Ask AI button
-        Expanded(
-          child: ElevatedButton.icon(
-            onPressed: () => _navigateToAskAI(context),
-            icon: const Icon(Icons.smart_toy_outlined, size: 18),
-            label: const Text('Ask AI'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.accentYellow,
-              foregroundColor: AppColors.background,
-              padding: const EdgeInsets.symmetric(vertical: 14),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+        // Primary row: Add to Cart and Ask AI
+        Row(
+          children: [
+            // Add to Cart button
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed: _toggleCart,
+                icon: Icon(
+                  _isInCart 
+                      ? Icons.check_circle_rounded 
+                      : Icons.add_shopping_cart_rounded,
+                  size: 18,
+                ),
+                label: Text(_isInCart ? 'In Cart' : 'Add to Cart'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _isInCart 
+                      ? AppColors.success 
+                      : AppColors.primaryBlue,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
               ),
             ),
-          ),
+            const SizedBox(width: 12),
+            // Ask AI button
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed: () => _navigateToAskAI(context),
+                icon: const Icon(Icons.smart_toy_outlined, size: 18),
+                label: const Text('Ask AI'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.accentYellow,
+                  foregroundColor: AppColors.background,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
+        // Secondary row: View on BestBuy
         if (product.url != null) ...[
-          const SizedBox(width: 12),
-          Expanded(
-            child: ElevatedButton.icon(
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
               onPressed: () => _openUrl(product.url!),
-              icon: const Icon(Icons.open_in_new, size: 18),
-              label: const Text('See on BestBuy.com'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primaryBlue,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 14),
+              icon: const Icon(Icons.open_in_new, size: 16),
+              label: const Text('View on BestBuy.com'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppColors.textSecondary,
+                side: const BorderSide(color: AppColors.border),
+                padding: const EdgeInsets.symmetric(vertical: 12),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),

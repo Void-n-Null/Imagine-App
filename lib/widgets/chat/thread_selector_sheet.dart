@@ -10,6 +10,9 @@ class ThreadSelectorSheet extends StatelessWidget {
   final void Function(ChatThread) onThreadSelected;
   final VoidCallback onNewThread;
   final void Function(String) onDeleteThread;
+  final bool isAuthenticated;
+  final VoidCallback onConnectOpenRouter;
+  final VoidCallback onDisconnectOpenRouter;
   
   const ThreadSelectorSheet({
     super.key,
@@ -18,6 +21,9 @@ class ThreadSelectorSheet extends StatelessWidget {
     required this.onThreadSelected,
     required this.onNewThread,
     required this.onDeleteThread,
+    required this.isAuthenticated,
+    required this.onConnectOpenRouter,
+    required this.onDisconnectOpenRouter,
   });
 
   @override
@@ -94,6 +100,17 @@ class ThreadSelectorSheet extends StatelessWidget {
                         );
                       },
                     ),
+            ),
+            
+            // OpenRouter connection status
+            const Divider(height: 1, color: AppColors.border),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: _OpenRouterStatusTile(
+                isAuthenticated: isAuthenticated,
+                onConnect: onConnectOpenRouter,
+                onDisconnect: onDisconnectOpenRouter,
+              ),
             ),
           ],
         );
@@ -414,6 +431,93 @@ class _ThreadTileState extends State<_ThreadTile> {
                   ),
                 ),
               ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// OpenRouter connection status tile
+class _OpenRouterStatusTile extends StatelessWidget {
+  final bool isAuthenticated;
+  final VoidCallback onConnect;
+  final VoidCallback onDisconnect;
+
+  const _OpenRouterStatusTile({
+    required this.isAuthenticated,
+    required this.onConnect,
+    required this.onDisconnect,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: isAuthenticated ? onDisconnect : onConnect,
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: isAuthenticated 
+              ? AppColors.success.withOpacity(0.1) 
+              : AppColors.surfaceVariant,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: isAuthenticated 
+                ? AppColors.success.withOpacity(0.3) 
+                : AppColors.border,
+          ),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: isAuthenticated 
+                    ? AppColors.success.withOpacity(0.2) 
+                    : AppColors.border.withOpacity(0.3),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                isAuthenticated 
+                    ? Icons.cloud_done_rounded 
+                    : Icons.cloud_off_rounded,
+                size: 20,
+                color: isAuthenticated 
+                    ? AppColors.success 
+                    : AppColors.textSecondary,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    isAuthenticated ? 'Connected to OpenRouter' : 'Not Connected',
+                    style: TextStyle(
+                      color: AppColors.textPrimary,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 14,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    isAuthenticated 
+                        ? 'Tap to disconnect' 
+                        : 'Tap to connect for AI features',
+                    style: TextStyle(
+                      color: AppColors.textSecondary,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(
+              Icons.chevron_right_rounded,
+              color: AppColors.textSecondary,
+              size: 20,
+            ),
           ],
         ),
       ),
