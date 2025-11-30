@@ -6,13 +6,9 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 - **In-App Update System:** The app now automatically checks for updates from GitHub Releases on startup.
-- **Update Modal:** A new dialog shows release notes (Markdown supported), version comparison, and options to update, skip, or silence reminders.
+- **Update Modal:** A new dialog shows release notes (Markdown supported), version comparison, and options to update, skip, or silence reminders
 - **Platform-Aware Updates:** Direct APK download and installation for Android, with appropriate fallbacks for other platforms.
 - **Update Preferences:** Added settings to remember skipped versions ("No Thanks") and silenced reminders ("Don't remind me").
-
-## [1.2.0] - 2025-11-30
-
-### Added
 - **Shopping Cart:** A fully functional shopping cart that persists across sessions.
 - **Cart Page:** A dedicated page for managing cart items, featuring a list view and a "Scan Mode" carousel for easy checkout at the register.
 - **Cart AI Tools:** The AI assistant can now add, remove, clear, and view items in your cart (`add_to_cart`, `remove_from_cart`, `clear_cart`, `view_cart`).
