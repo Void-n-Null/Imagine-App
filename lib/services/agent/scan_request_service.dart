@@ -188,3 +188,5 @@ class ScanRequestService extends ChangeNotifier {
   }
 }
 
+
+

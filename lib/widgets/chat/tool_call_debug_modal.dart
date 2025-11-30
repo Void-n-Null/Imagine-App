@@ -474,3 +474,5 @@ List<ToolCallWithResult> extractToolCallsWithResults(List<ChatMessage> messages)
   return results;
 }
 
+
+
