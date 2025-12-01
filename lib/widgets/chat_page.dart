@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../config/api_keys.dart';
 import '../services/agent/agent.dart';
 import '../services/bestbuy/bestbuy.dart';
+import '../services/comparison/comparison.dart';
 import '../services/openrouter/openrouter_auth_page.dart';
 import '../services/openrouter/openrouter_auth_service.dart';
 import '../services/openrouter/openrouter_models.dart';
@@ -22,6 +23,8 @@ import 'chat/thread_selector_sheet.dart';
 import 'chat/status_queue_manager.dart';
 import 'chat/tool_call_debug_modal.dart';
 import 'app_info_modal.dart';
+import 'settings_page.dart';
+import 'product_comparison_page.dart';
 
 /// Set to true to show tool call debug button in the UI.
 /// This allows viewing the exact tool calls and their results.
@@ -188,6 +191,9 @@ class _ChatPageState extends State<ChatPage> {
     registry.register(RemoveFromCartTool());
     registry.register(ClearCartTool());
     registry.register(ViewCartTool());
+    
+    // Comparison tools
+    registry.register(CompareProductsTool(client: _bestBuyClient));
   }
   
 
@@ -213,15 +219,6 @@ class _ChatPageState extends State<ChatPage> {
     }
   }
   
-  void _showInfoModal() {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) => const AppInfoModal(),
-    );
-  }
-
   void _showToolCallsDebug() {
     final toolCalls = extractToolCallsWithResults(_messages);
     if (toolCalls.isEmpty) {
@@ -235,37 +232,6 @@ class _ChatPageState extends State<ChatPage> {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) => ToolCallsListModal(toolCalls: toolCalls),
-    );
-  }
-
-  void _showModelSelector() {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: AppColors.surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) => ModelSelectorSheet(
-        models: _modelManager.modelsToShow,
-        selectedModelId: _modelManager.selectedModelId,
-        isLoading: _modelManager.isLoading,
-        onRefresh: () async {
-          await _modelManager.loadModels();
-          if (mounted) setState(() {});
-        },
-        onModelSelected: (model) async {
-          await _settings.setSelectedModel(model.id);
-          _agentManager.createAgentRunner(model.id);
-          if (mounted) {
-            setState(() {});
-            Navigator.pop(context);
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Switched to ${model.name}')),
-            );
-          }
-        },
-      ),
     );
   }
   
@@ -345,6 +311,40 @@ class _ChatPageState extends State<ChatPage> {
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (context) => const CartPage(),
+      ),
+    );
+  }
+
+  void _navigateToSettings() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => SettingsPage(
+          models: _modelManager.modelsToShow,
+          selectedModelId: _modelManager.selectedModelId,
+          isLoadingModels: _modelManager.isLoading,
+          onRefreshModels: () async {
+            await _modelManager.loadModels();
+            if (mounted) setState(() {});
+          },
+          onModelSelected: (model) async {
+            await _settings.setSelectedModel(model.id);
+            _agentManager.createAgentRunner(model.id);
+            if (mounted) setState(() {});
+          },
+          isAuthenticated: _isAuthenticated,
+          onAuthChanged: () async {
+            await _checkAuthStatus();
+            if (mounted) setState(() {});
+          },
+        ),
+      ),
+    );
+  }
+
+  void _navigateToComparison() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => const ProductComparisonPage(),
       ),
     );
   }
@@ -454,9 +454,6 @@ class _ChatPageState extends State<ChatPage> {
       backgroundColor: AppColors.background,
       appBar: _isLandingState ? _buildLandingAppBar() : buildChatAppBar(
         context: context,
-        selectedModelName: _modelManager.getSelectedModelName(),
-        isAuthenticated: _isAuthenticated,
-        onModelSelectorTap: _showModelSelector,
         onThreadSelectorTap: _showThreadSelector,
         onNewChat: () {
           _chatManager.createNewThread();
@@ -466,7 +463,8 @@ class _ChatPageState extends State<ChatPage> {
         },
         onScanProduct: _navigateToScanner,
         onOpenCart: _navigateToCart,
-        onShowInfo: _showInfoModal,
+        onOpenSettings: _navigateToSettings,
+        onOpenComparison: _navigateToComparison,
       ),
       body: _isLandingState
           ? ChatEmptyState(
@@ -475,8 +473,6 @@ class _ChatPageState extends State<ChatPage> {
               inputController: _inputController,
               onSendMessage: _sendMessage,
               isProcessing: _isProcessing,
-              selectedModelName: _modelManager.getSelectedModelName(),
-              onModelSelectorTap: _showModelSelector,
             )
           : _buildChatBody(),
     );
@@ -495,15 +491,17 @@ class _ChatPageState extends State<ChatPage> {
       ),
       actions: [
         IconButton(
-          icon: const Icon(Icons.help_outline_rounded),
-          tooltip: 'App Info',
-          onPressed: _showInfoModal,
+          icon: const Icon(Icons.settings_outlined),
+          tooltip: 'Settings',
+          onPressed: _navigateToSettings,
         ),
         IconButton(
           icon: const Icon(Icons.qr_code_scanner_rounded),
           tooltip: 'Scan Product',
           onPressed: _navigateToScanner,
         ),
+        // Comparison button with badge
+        _LandingComparisonButton(onPressed: _navigateToComparison),
         // Cart button with badge
         _LandingCartButton(onPressed: _navigateToCart),
       ],
@@ -582,6 +580,56 @@ class _ChatPageState extends State<ChatPage> {
           onSendMessage: _sendMessage,
         ),
       ],
+    );
+  }
+}
+
+/// Comparison icon button with item count badge for landing page
+class _LandingComparisonButton extends StatefulWidget {
+  final VoidCallback onPressed;
+
+  const _LandingComparisonButton({required this.onPressed});
+
+  @override
+  State<_LandingComparisonButton> createState() => _LandingComparisonButtonState();
+}
+
+class _LandingComparisonButtonState extends State<_LandingComparisonButton> {
+  final ComparisonService _comparison = ComparisonService.instance;
+
+  @override
+  void initState() {
+    super.initState();
+    _comparison.addListener(_onComparisonChanged);
+  }
+
+  @override
+  void dispose() {
+    _comparison.removeListener(_onComparisonChanged);
+    super.dispose();
+  }
+
+  void _onComparisonChanged() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final itemCount = _comparison.itemCount;
+    
+    return IconButton(
+      icon: Badge(
+        isLabelVisible: itemCount > 0,
+        label: Text(
+          itemCount > 99 ? '99+' : itemCount.toString(),
+          style: const TextStyle(fontSize: 10),
+        ),
+        backgroundColor: AppColors.secondaryBlue,
+        textColor: AppColors.background,
+        child: const Icon(Icons.compare_outlined),
+      ),
+      tooltip: 'Product Comparison',
+      onPressed: widget.onPressed,
     );
   }
 }

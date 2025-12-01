@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'services/comparison/comparison.dart';
 import 'services/storage/storage.dart';
 import 'services/update/update.dart';
 import 'widgets/update_modal.dart';
@@ -24,6 +25,7 @@ void main() async {
   await ChatStorageService.initialize();
   await ChatManager.initialize();
   await CartService.initialize();
+  await ComparisonService.initialize();
   
   runApp(const ImagineApp());
 }

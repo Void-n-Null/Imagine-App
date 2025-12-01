@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import '../../services/bestbuy/bestbuy.dart';
 import '../../theme/app_colors.dart';
+import '../comparison_badge.dart';
 import '../product_badge.dart';
 
 /// Utility class for rendering markdown content in chat messages
@@ -26,9 +27,12 @@ class ChatMarkdownRenderer {
       );
     }
     
-    // Check if content has product references
-    if (ProductBadgeParser.hasProducts(content)) {
-      return _buildMarkdownWithProducts(content, textColor, codeBackground, client);
+    // Check if content has product or comparison references
+    final hasProducts = ProductBadgeParser.hasProducts(content);
+    final hasComparisons = ComparisonBadgeParser.hasComparisons(content);
+    
+    if (hasProducts || hasComparisons) {
+      return _buildMarkdownWithBadges(content, textColor, codeBackground, client);
     }
     
     // Regular markdown
@@ -86,8 +90,8 @@ class ChatMarkdownRenderer {
     );
   }
   
-  /// Build markdown content interspersed with product badges.
-  static Widget _buildMarkdownWithProducts(
+  /// Build markdown content interspersed with product badges and comparison badges.
+  static Widget _buildMarkdownWithBadges(
     String content,
     Color textColor,
     Color codeBackground,
@@ -102,11 +106,12 @@ class ChatMarkdownRenderer {
       );
     }
 
-    final productPattern = RegExp(r'\[Product\((\d+)\)\]');
+    // Combined pattern for both Product and Compare syntax
+    final badgePattern = RegExp(r'\[Product\((\d+)\)\]|\[Compare\(([0-9,\s]+)\)\]');
     final widgets = <Widget>[];
     int lastEnd = 0;
     
-    for (final match in productPattern.allMatches(content)) {
+    for (final match in badgePattern.allMatches(content)) {
       // Add markdown for text before this match
       if (match.start > lastEnd) {
         final textBefore = content.substring(lastEnd, match.start).trim();
@@ -122,9 +127,25 @@ class ChatMarkdownRenderer {
         }
       }
       
-      // Add product badge
-      final sku = int.parse(match.group(1)!);
-      widgets.add(ProductBadge(sku: sku, client: client));
+      // Determine which type of badge to add
+      if (match.group(1) != null) {
+        // Product badge: [Product(SKU)]
+        final sku = int.parse(match.group(1)!);
+        widgets.add(ProductBadge(sku: sku, client: client));
+      } else if (match.group(2) != null) {
+        // Comparison badge: [Compare(SKU1,SKU2,...)]
+        final skuString = match.group(2)!;
+        final skus = skuString
+            .split(',')
+            .map((s) => int.tryParse(s.trim()))
+            .where((sku) => sku != null)
+            .cast<int>()
+            .toList();
+        
+        if (skus.length >= 2) {
+          widgets.add(ComparisonBadge(skus: skus, client: client));
+        }
+      }
       
       lastEnd = match.end;
     }

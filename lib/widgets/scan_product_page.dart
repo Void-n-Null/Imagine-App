@@ -7,6 +7,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import '../config/api_keys.dart';
 import '../services/agent/scan_request_service.dart';
 import '../services/bestbuy/bestbuy.dart';
+import '../services/comparison/comparison.dart';
 import '../theme/app_colors.dart';
 import 'product_detail_page.dart';
 import 'product_search_page.dart';
@@ -15,6 +16,11 @@ import 'product_search_page.dart';
 class ScanRequestArgs {
   final ScanRequest request;
   const ScanRequestArgs({required this.request});
+}
+
+/// Route arguments for comparison mode
+class ComparisonModeArgs {
+  const ComparisonModeArgs();
 }
 
 class ScanProductPage extends StatefulWidget {
@@ -42,6 +48,9 @@ class _ScanProductPageState extends State<ScanProductPage> {
   int _remainingSeconds = 20;
   bool _hasNavigatedBack = false;
   
+  // Comparison mode
+  bool _isComparisonMode = false;
+  
   // Debounce/cooldown logic
   String? _lastScannedCode;
   bool _isLookingUp = false;
@@ -57,10 +66,17 @@ class _ScanProductPageState extends State<ScanProductPage> {
     super.initState();
     _bestBuyClient = BestBuyClient(apiKey: ApiKeys.bestBuy);
     
+    // Listen to comparison changes for UI updates
+    ComparisonService.instance.addListener(_onComparisonChanged);
+    
     // Lock orientation to portrait for consistent camera view
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
     ]);
+  }
+
+  void _onComparisonChanged() {
+    if (mounted) setState(() {});
   }
   
   @override
@@ -76,6 +92,8 @@ class _ScanProductPageState extends State<ScanProductPage> {
         // Reset timer to full duration when page opens, ignoring navigation delay
         _remainingSeconds = args.request.timeout.inSeconds;
         _startCountdown();
+      } else if (args is ComparisonModeArgs) {
+        _isComparisonMode = true;
       }
     }
   }
@@ -92,6 +110,7 @@ class _ScanProductPageState extends State<ScanProductPage> {
     
     _countdownTimer?.cancel();
     _cooldownTimer?.cancel();
+    ComparisonService.instance.removeListener(_onComparisonChanged);
     _scannerController.dispose();
     _searchController.dispose();
     _searchFocusNode.dispose();
@@ -140,6 +159,7 @@ class _ScanProductPageState extends State<ScanProductPage> {
         builder: (context) => ProductSearchPage(
           client: _bestBuyClient,
           initialQuery: initialQuery,
+          comparisonMode: _isComparisonMode,
         ),
       ),
     ).then((_) {
@@ -298,6 +318,9 @@ class _ScanProductPageState extends State<ScanProductPage> {
         ScanRequestService.instance.completeScan(product);
         Navigator.of(context).pop();
       }
+    } else if (_isComparisonMode) {
+      // In comparison mode, add product to comparison list
+      _addToComparison(product);
     } else {
       // Normal mode: navigate to product detail
       Navigator.of(context).push(
@@ -309,6 +332,61 @@ class _ScanProductPageState extends State<ScanProductPage> {
         _lastScannedCode = null;
       });
     }
+  }
+
+  Future<void> _addToComparison(BestBuyProduct product) async {
+    final comparison = ComparisonService.instance;
+    
+    if (comparison.containsSku(product.sku)) {
+      _showTip('${product.name} is already in comparison');
+      _lastScannedCode = null;
+      return;
+    }
+    
+    if (comparison.isFull) {
+      _showTip('Comparison list is full (max ${ComparisonService.maxComparisonItems})', isError: true);
+      _lastScannedCode = null;
+      return;
+    }
+    
+    // Add product and wait for persistence
+    await comparison.addToComparison(product);
+    
+    if (!mounted) return;
+    
+    HapticFeedback.lightImpact();
+    
+    final count = comparison.itemCount;
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.check_circle_outline, color: Colors.white, size: 18),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Added to comparison ($count item${count == 1 ? '' : 's'})',
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+        backgroundColor: AppColors.success,
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 2),
+        margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        action: count >= 2 ? SnackBarAction(
+          label: 'Compare',
+          textColor: Colors.white,
+          onPressed: () => Navigator.of(context).pop(),
+        ) : null,
+      ),
+    );
+    
+    // Reset so user can scan more products
+    _lastScannedCode = null;
   }
   
   /// Handle invalid barcode - show tip and continue scanning after 1 second
@@ -366,9 +444,11 @@ class _ScanProductPageState extends State<ScanProductPage> {
         body: SafeArea(
           child: Column(
             children: [
-              // Show request mode header or normal header
+              // Show request mode header, comparison mode header, or normal header
               if (_isRequestMode)
                 _buildRequestModeHeader()
+              else if (_isComparisonMode)
+                _buildComparisonModeHeader()
               else
                 _buildHeader(),
               // Scanner fills the rest
@@ -383,7 +463,9 @@ class _ScanProductPageState extends State<ScanProductPage> {
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                 child: _isRequestMode
                     ? _buildRequestModeButton()
-                    : _buildBackButton(),
+                    : _isComparisonMode
+                        ? _buildComparisonModeButton()
+                        : _buildBackButton(),
               ),
             ],
           ),
@@ -515,6 +597,214 @@ class _ScanProductPageState extends State<ScanProductPage> {
           ),
         ],
       ),
+    );
+  }
+
+  /// Build header for comparison mode
+  Widget _buildComparisonModeHeader() {
+    final itemCount = ComparisonService.instance.itemCount;
+    
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            AppColors.secondaryBlue,
+            AppColors.secondaryBlue.withValues(alpha: 0.85),
+          ],
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.secondaryBlue.withValues(alpha: 0.3),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Title row with back button and count
+          Row(
+            children: [
+              IconButton(
+                icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
+                onPressed: _handleCancel,
+                tooltip: 'Back',
+              ),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.compare_rounded,
+                      color: Colors.white,
+                      size: 16,
+                    ),
+                    const SizedBox(width: 6),
+                    const Text(
+                      'Add to Compare',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Spacer(),
+              // Item count badge
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.compare_arrows_rounded,
+                      color: Colors.white,
+                      size: 18,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      '$itemCount item${itemCount == 1 ? '' : 's'}',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          // Instructions
+          const Text(
+            'Scan or Search Products',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Products will be added to your comparison list',
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.85),
+              fontSize: 14,
+            ),
+          ),
+          const SizedBox(height: 16),
+          // Search bar
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.3)),
+            ),
+            child: TextField(
+              controller: _searchController,
+              focusNode: _searchFocusNode,
+              onTap: () {
+                _searchFocusNode.unfocus();
+                _navigateToSearch();
+              },
+              onSubmitted: (value) {
+                _navigateToSearch(initialQuery: value);
+              },
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+              ),
+              decoration: InputDecoration(
+                hintText: 'Search products...',
+                hintStyle: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.6),
+                ),
+                prefixIcon: Icon(
+                  Icons.search,
+                  color: Colors.white.withValues(alpha: 0.8),
+                  size: 22,
+                ),
+                border: InputBorder.none,
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 14,
+                ),
+              ),
+              textInputAction: TextInputAction.search,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  Widget _buildComparisonModeButton() {
+    final itemCount = ComparisonService.instance.itemCount;
+    
+    return Column(
+      children: [
+        if (itemCount >= 2)
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              icon: const Icon(Icons.compare_arrows_rounded),
+              label: Text(
+                'Compare $itemCount Products',
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                backgroundColor: AppColors.secondaryBlue,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+              onPressed: () => Navigator.of(context).pop(),
+            ),
+          ),
+        if (itemCount >= 2) const SizedBox(height: 10),
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            icon: const Icon(Icons.add_rounded),
+            label: Text(
+              itemCount < 2 ? 'Add ${2 - itemCount} more to compare' : 'Add More Products',
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            style: OutlinedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              foregroundColor: AppColors.textSecondary,
+              side: BorderSide(color: AppColors.border),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+            ),
+            onPressed: null, // Disabled - just informational
+          ),
+        ),
+      ],
     );
   }
 

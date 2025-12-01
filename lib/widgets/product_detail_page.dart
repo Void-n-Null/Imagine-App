@@ -7,8 +7,11 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../config/api_keys.dart';
 import '../services/bestbuy/bestbuy.dart';
+import '../services/comparison/comparison.dart';
 import '../services/storage/storage.dart';
 import '../theme/app_colors.dart';
+import 'product_comparison_page.dart';
+import 'product_detail/product_detail.dart';
 
 /// Full-screen page displaying comprehensive product information.
 class ProductDetailPage extends StatefulWidget {
@@ -24,7 +27,6 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
   bool _detailsExpanded = false;
   bool _descriptionExpanded = false;
   bool _featuresExpanded = false;
-  bool _categoryExpanded = false;
   String _detailsSearchQuery = '';
 
   // Store availability state
@@ -37,13 +39,19 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
   final CartService _cart = CartService.instance;
   bool _isInCart = false;
 
+  // Comparison state
+  final ComparisonService _comparisonService = ComparisonService.instance;
+  bool _isInComparison = false;
+
   BestBuyProduct get product => widget.product;
 
   @override
   void initState() {
     super.initState();
     _isInCart = _cart.containsSku(product.sku);
+    _isInComparison = _comparisonService.containsSku(product.sku);
     _cart.addListener(_onCartChanged);
+    _comparisonService.addListener(_onComparisonChanged);
     
     // Auto-fetch store availability if product is marked as in-store available
     if (product.inStoreAvailability == true) {
@@ -54,6 +62,7 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
   @override
   void dispose() {
     _cart.removeListener(_onCartChanged);
+    _comparisonService.removeListener(_onComparisonChanged);
     super.dispose();
   }
 
@@ -63,6 +72,69 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
         _isInCart = _cart.containsSku(product.sku);
       });
     }
+  }
+
+  void _onComparisonChanged() {
+    if (mounted) {
+      setState(() {
+        _isInComparison = _comparisonService.containsSku(product.sku);
+      });
+    }
+  }
+
+  Future<void> _toggleComparison() async {
+    if (_isInComparison) {
+      await _comparisonService.removeFromComparison(product.sku);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Removed from comparison'),
+          action: SnackBarAction(
+            label: 'Undo',
+            onPressed: () => _comparisonService.addToComparison(product),
+          ),
+        ),
+      );
+    } else {
+      if (_comparisonService.isFull) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Comparison list is full (max ${ComparisonService.maxComparisonItems} items)'),
+            action: SnackBarAction(
+              label: 'View',
+              onPressed: _navigateToComparison,
+            ),
+          ),
+        );
+        return;
+      }
+      
+      await _comparisonService.addToComparison(product);
+      if (!mounted) return;
+      await HapticFeedback.lightImpact();
+      
+      final count = _comparisonService.itemCount;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(count >= 2 
+              ? 'Added to comparison ($count items)' 
+              : 'Added to comparison - add 1 more to compare'),
+          action: count >= 2 ? SnackBarAction(
+            label: 'Compare',
+            onPressed: _navigateToComparison,
+          ) : null,
+        ),
+      );
+    }
+  }
+
+  void _navigateToComparison() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => const ProductComparisonPage(),
+      ),
+    );
   }
 
   Future<void> _toggleCart() async {
@@ -239,7 +311,12 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Unified image area with gradient flowing into content
-            _buildImageSection(context, topPadding),
+            ProductImageSection(
+              product: product,
+              topPadding: topPadding,
+              onBack: () => Navigator.of(context).pop(),
+              onShare: () => _shareProduct(context),
+            ),
             
             // Main content area
             Padding(
@@ -258,11 +335,32 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
                   ],
 
                   // Stock status - prominent availability
-                  _buildStockStatus(context),
+                  StockStatusSection(
+                    product: product,
+                    storeAvailabilityWidget: StoreAvailabilitySection(
+                      isLoading: _loadingStoreAvailability,
+                      error: _storeAvailabilityError,
+                      availability: _storeAvailability,
+                      userPostalCode: _userPostalCode,
+                      onRetry: _fetchStoreAvailability,
+                      onSearchByPostalCode: _searchByPostalCode,
+                      onUseCurrentLocation: _useCurrentLocation,
+                    ),
+                  ),
                   const SizedBox(height: 20),
 
                   // Action buttons - prominent placement
-                  _buildActionButtons(context),
+                  ActionButtons(
+                    product: product,
+                    isInCart: _isInCart,
+                    isInComparison: _isInComparison,
+                    comparisonService: _comparisonService,
+                    onToggleCart: _toggleCart,
+                    onToggleComparison: _toggleComparison,
+                    onNavigateToComparison: _navigateToComparison,
+                    onAskAI: () => _navigateToAskAI(context),
+                    onOpenUrl: _openUrl,
+                  ),
                   const SizedBox(height: 20),
 
                   // Quick info chips (shipping, etc.)
@@ -318,7 +416,7 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
                   // Categories
                   if (product.categoryPath.isNotEmpty) ...[
                     const SizedBox(height: 24),
-                    _buildCategorySection(context),
+                    CategorySection(categories: product.categoryPath),
                   ],
 
                   // Special offers
@@ -330,7 +428,10 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
                   // Customer Reviews
                   if (product.customerReviewAverage != null) ...[
                     const SizedBox(height: 24),
-                    _buildRatingSection(context),
+                    RatingSection(
+                      product: product,
+                      buildSection: _buildSection,
+                    ),
                   ],
 
                   const SizedBox(height: 40),
@@ -339,119 +440,6 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
             ),
           ],
         ),
-      ),
-    );
-  }
-
-  Widget _buildImageSection(BuildContext context, double topPadding) {
-    return Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            AppColors.surfaceVariant,
-            AppColors.surface,
-            AppColors.background,
-          ],
-          stops: [0.0, 0.6, 1.0],
-        ),
-      ),
-      child: Stack(
-        children: [
-          // Image content
-          Padding(
-            padding: EdgeInsets.only(top: topPadding + 50, bottom: 20),
-            child: Center(
-              child: product.bestImage != null
-                  ? Hero(
-                      tag: 'product_${product.sku}',
-                      child: Container(
-                        margin: const EdgeInsets.symmetric(horizontal: 32),
-                        padding: const EdgeInsets.all(16),
-                        constraints: const BoxConstraints(maxHeight: 220),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(20),
-                          boxShadow: [
-                            BoxShadow(
-                              color: AppColors.primaryBlue.withValues(alpha: 0.15),
-                              blurRadius: 30,
-                              offset: const Offset(0, 12),
-                            ),
-                          ],
-                        ),
-                        child: Image.network(
-                          product.bestImage!,
-                          fit: BoxFit.contain,
-                          errorBuilder: (_, __, ___) => const Icon(
-                            Icons.image_not_supported_outlined,
-                            size: 80,
-                            color: AppColors.textSecondary,
-                          ),
-                        ),
-                      ),
-                    )
-                  : Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 32),
-                      padding: const EdgeInsets.all(32),
-                      decoration: BoxDecoration(
-                        color: AppColors.surfaceVariant,
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: const Icon(
-                        Icons.inventory_2_outlined,
-                        size: 80,
-                        color: AppColors.textSecondary,
-                      ),
-                    ),
-            ),
-          ),
-          
-          // Navigation buttons overlay
-          Positioned(
-            top: topPadding + 8,
-            left: 8,
-            right: 8,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Container(
-                  decoration: BoxDecoration(
-                    color: AppColors.background.withValues(alpha: 0.8),
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.2),
-                        blurRadius: 8,
-                      ),
-                    ],
-                  ),
-                  child: IconButton(
-                    icon: const Icon(Icons.arrow_back, color: AppColors.textPrimary),
-                    onPressed: () => Navigator.of(context).pop(),
-                  ),
-                ),
-                Container(
-                  decoration: BoxDecoration(
-                    color: AppColors.background.withValues(alpha: 0.8),
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.2),
-                        blurRadius: 8,
-                      ),
-                    ],
-                  ),
-                  child: IconButton(
-                    icon: const Icon(Icons.share_outlined, color: AppColors.textPrimary),
-                    onPressed: () => _shareProduct(context),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -494,7 +482,7 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
         const SizedBox(height: 16),
 
         // Price section - moved above SKU card
-        _buildPriceSection(context),
+        PriceSection(product: product),
         const SizedBox(height: 16),
 
         // Brand & Model row with copyable identifiers
@@ -789,950 +777,6 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
                   ),
                 ),
               ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildPriceSection(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Main price
-        Text(
-          '\$${product.effectivePrice?.toStringAsFixed(2) ?? 'N/A'}',
-          style: Theme.of(context).textTheme.headlineLarge?.copyWith(
-                color: product.onSale == true
-                    ? AppColors.sale
-                    : AppColors.accentYellow,
-                fontWeight: FontWeight.bold,
-              ),
-        ),
-        // Sale info: savings amount and original price
-        if (product.onSale == true && product.dollarSavings != null) ...[
-          const SizedBox(height: 4),
-          Text(
-            'You save \$${product.dollarSavings!.toStringAsFixed(2)}',
-            style: const TextStyle(
-              color: AppColors.success,
-              fontWeight: FontWeight.w600,
-              fontSize: 15,
-            ),
-          ),
-        ],
-        if (product.onSale == true && product.regularPrice != null) ...[
-          const SizedBox(height: 2),
-          Text(
-            'Originally \$${product.regularPrice!.toStringAsFixed(2)}',
-            style: const TextStyle(
-              color: AppColors.textSecondary,
-              fontSize: 13,
-            ),
-          ),
-        ],
-      ],
-    );
-  }
-
-  Widget _buildStockStatus(BuildContext context) {
-    final isOnline = product.onlineAvailability == true;
-    final isInStore = product.inStoreAvailability == true;
-    final isAvailable = isOnline || isInStore;
-
-    return Column(
-      children: [
-        // Main stock status card
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: isAvailable
-                ? AppColors.success.withValues(alpha: 0.1)
-                : AppColors.error.withValues(alpha: 0.1),
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-              color: isAvailable
-                  ? AppColors.success.withValues(alpha: 0.3)
-                  : AppColors.error.withValues(alpha: 0.3),
-            ),
-          ),
-          child: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: isAvailable
-                      ? AppColors.success.withValues(alpha: 0.2)
-                      : AppColors.error.withValues(alpha: 0.2),
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(
-                  isAvailable ? Icons.check_circle : Icons.cancel,
-                  color: isAvailable ? AppColors.success : AppColors.error,
-                  size: 24,
-                ),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      isAvailable ? 'In Stock' : 'Out of Stock',
-                      style: TextStyle(
-                        color: isAvailable ? AppColors.success : AppColors.error,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      isOnline && isInStore
-                          ? 'Available online & in-store'
-                          : isOnline
-                              ? 'Available online only'
-                              : isInStore
-                                  ? 'Available in-store only'
-                                  : 'Currently unavailable',
-                      style: const TextStyle(
-                        color: AppColors.textSecondary,
-                        fontSize: 13,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-
-        // Store availability section (only for in-store products)
-        if (isInStore) ...[
-          const SizedBox(height: 12),
-          _buildStoreAvailabilitySection(context),
-        ],
-      ],
-    );
-  }
-
-  Widget _buildStoreAvailabilitySection(BuildContext context) {
-    // Loading state
-    if (_loadingStoreAvailability) {
-      return Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: AppColors.border),
-        ),
-        child: const Row(
-          children: [
-            SizedBox(
-              width: 20,
-              height: 20,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: AppColors.primaryBlue,
-              ),
-            ),
-            SizedBox(width: 14),
-            Text(
-              'Finding nearest store...',
-              style: TextStyle(
-                color: AppColors.textSecondary,
-                fontSize: 14,
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    // Need location input
-    if (_storeAvailabilityError == 'location_needed') {
-      return _buildPostalCodeInput(context);
-    }
-
-    // Error state
-    if (_storeAvailabilityError != null) {
-      return Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: AppColors.border),
-        ),
-        child: Column(
-          children: [
-            Row(
-              children: [
-                Icon(
-                  Icons.error_outline,
-                  color: AppColors.textSecondary.withValues(alpha: 0.7),
-                  size: 20,
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    'Could not find nearby stores',
-                    style: TextStyle(
-                      color: AppColors.textSecondary,
-                      fontSize: 14,
-                    ),
-                  ),
-                ),
-                TextButton(
-                  onPressed: _fetchStoreAvailability,
-                  child: const Text('Retry'),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            _buildPostalCodeInput(context, compact: true),
-          ],
-        ),
-      );
-    }
-
-    // Store found
-    if (_storeAvailability != null && _storeAvailability!.hasAvailableStores) {
-      return _buildNearestStoreCard(context, _storeAvailability!);
-    }
-
-    // No stores available - show search option
-    if (_storeAvailability != null && !_storeAvailability!.hasAvailableStores) {
-      return Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: AppColors.border),
-        ),
-        child: Column(
-          children: [
-            Row(
-              children: [
-                Icon(
-                  Icons.store_outlined,
-                  color: AppColors.textSecondary.withValues(alpha: 0.7),
-                  size: 20,
-                ),
-                const SizedBox(width: 12),
-                const Expanded(
-                  child: Text(
-                    'No stores with this product nearby',
-                    style: TextStyle(
-                      color: AppColors.textSecondary,
-                      fontSize: 14,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            _buildPostalCodeInput(context, compact: true),
-          ],
-        ),
-      );
-    }
-
-    // Default: Show find store button
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Column(
-        children: [
-          InkWell(
-            onTap: _fetchStoreAvailability,
-            borderRadius: BorderRadius.circular(10),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              decoration: BoxDecoration(
-                color: AppColors.primaryBlue.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: const Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.location_on_outlined, 
-                       size: 20, color: AppColors.primaryBlue),
-                  SizedBox(width: 8),
-                  Text(
-                    'Find Nearest Store',
-                    style: TextStyle(
-                      color: AppColors.primaryBlue,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 14,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildPostalCodeInput(BuildContext context, {bool compact = false}) {
-    final controller = TextEditingController(text: _userPostalCode);
-    
-    return Container(
-      padding: compact ? EdgeInsets.zero : const EdgeInsets.all(16),
-      decoration: compact
-          ? null
-          : BoxDecoration(
-              color: AppColors.surface,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: AppColors.border),
-            ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (!compact) ...[
-            Row(
-              children: [
-                Icon(
-                  Icons.location_on_outlined,
-                  color: AppColors.textSecondary.withValues(alpha: 0.7),
-                  size: 20,
-                ),
-                const SizedBox(width: 12),
-                const Text(
-                  'Enter your ZIP code to find stores',
-                  style: TextStyle(
-                    color: AppColors.textSecondary,
-                    fontSize: 14,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-          ],
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: controller,
-                  keyboardType: TextInputType.number,
-                  maxLength: 5,
-                  style: const TextStyle(
-                    color: AppColors.textPrimary,
-                    fontSize: 16,
-                    letterSpacing: 2,
-                  ),
-                  decoration: InputDecoration(
-                    hintText: '12345',
-                    hintStyle: TextStyle(
-                      color: AppColors.textSecondary.withValues(alpha: 0.5),
-                      letterSpacing: 2,
-                    ),
-                    counterText: '',
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 12,
-                    ),
-                    filled: true,
-                    fillColor: AppColors.surfaceVariant,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: BorderSide.none,
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: const BorderSide(
-                        color: AppColors.primaryBlue,
-                        width: 2,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              ElevatedButton(
-                onPressed: () {
-                  if (controller.text.length == 5) {
-                    _searchByPostalCode(controller.text);
-                  }
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primaryBlue,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 14,
-                  ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                ),
-                child: const Text(
-                  'Search',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          // Option to switch back to GPS if not already using it
-          if (_userPostalCode != null) ...[
-            const SizedBox(height: 12),
-            Center(
-              child: TextButton.icon(
-                onPressed: _useCurrentLocation,
-                icon: const Icon(Icons.my_location, size: 16),
-                label: const Text('Use Current Location'),
-                style: TextButton.styleFrom(
-                  foregroundColor: AppColors.primaryBlue,
-                ),
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _buildNearestStoreCard(
-    BuildContext context,
-    StoreAvailabilityResponse availability,
-  ) {
-    final store = availability.nearestStore!;
-    final otherStoresCount = availability.stores.length - 1;
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            AppColors.primaryBlue.withValues(alpha: 0.1),
-            AppColors.primaryBlue.withValues(alpha: 0.05),
-          ],
-        ),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.primaryBlue.withValues(alpha: 0.3)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Header row
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: AppColors.primaryBlue.withValues(alpha: 0.2),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(
-                  Icons.store,
-                  color: AppColors.primaryBlue,
-                  size: 20,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Nearest Store with Stock',
-                      style: TextStyle(
-                        color: AppColors.textSecondary,
-                        fontSize: 12,
-                      ),
-                    ),
-                    Text(
-                      store.name ?? 'Best Buy',
-                      style: const TextStyle(
-                        color: AppColors.textPrimary,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              if (store.distance != null)
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: AppColors.accentYellow.withValues(alpha: 0.2),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(
-                        Icons.directions_car_outlined,
-                        size: 14,
-                        color: AppColors.accentYellow,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        store.distanceFormatted ?? '',
-                        style: const TextStyle(
-                          color: AppColors.accentYellow,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 13,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-            ],
-          ),
-          const SizedBox(height: 12),
-
-          // Address
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(
-                Icons.location_on_outlined,
-                size: 16,
-                color: AppColors.textSecondary.withValues(alpha: 0.7),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  store.fullAddress,
-                  style: const TextStyle(
-                    color: AppColors.textSecondary,
-                    fontSize: 13,
-                    height: 1.4,
-                  ),
-                ),
-              ),
-            ],
-          ),
-
-          // Low stock warning
-          if (store.lowStock) ...[
-            const SizedBox(height: 10),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(
-                color: AppColors.accentYellow.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: const Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.warning_amber_rounded,
-                    size: 14,
-                    color: AppColors.accentYellow,
-                  ),
-                  SizedBox(width: 6),
-                  Text(
-                    'Low Stock - Act Fast!',
-                    style: TextStyle(
-                      color: AppColors.accentYellow,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 12,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-
-          // Pickup eligibility
-          if (availability.ispuEligible) ...[
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                Icon(
-                  Icons.check_circle,
-                  size: 14,
-                  color: AppColors.success.withValues(alpha: 0.8),
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  store.minPickupHours != null
-                      ? 'Ready for pickup in ${store.minPickupHours}+ hours'
-                      : 'Eligible for in-store pickup',
-                  style: const TextStyle(
-                    color: AppColors.success,
-                    fontSize: 12,
-                  ),
-                ),
-              ],
-            ),
-          ],
-
-          // Other stores available
-          if (otherStoresCount > 0) ...[
-            const SizedBox(height: 12),
-            const Divider(color: AppColors.border, height: 1),
-            const SizedBox(height: 12),
-            InkWell(
-              onTap: () => _showAllStores(context, availability),
-              borderRadius: BorderRadius.circular(8),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                child: Row(
-                  children: [
-                    Text(
-                      '+$otherStoresCount more store${otherStoresCount == 1 ? '' : 's'} nearby',
-                      style: const TextStyle(
-                        color: AppColors.primaryBlue,
-                        fontWeight: FontWeight.w600,
-                        fontSize: 13,
-                      ),
-                    ),
-                    const SizedBox(width: 4),
-                    const Icon(
-                      Icons.chevron_right,
-                      size: 18,
-                      color: AppColors.primaryBlue,
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-
-          // Actions row
-          const SizedBox(height: 14),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: () => _openDirections(store),
-                  icon: const Icon(Icons.directions, size: 18),
-                  label: const Text('Directions'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppColors.primaryBlue,
-                    side: const BorderSide(color: AppColors.primaryBlue),
-                    padding: const EdgeInsets.symmetric(vertical: 10),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: () => _showPostalCodeDialog(context),
-                  icon: const Icon(Icons.search, size: 18),
-                  label: const Text('Change Location'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppColors.textSecondary,
-                    side: const BorderSide(color: AppColors.border),
-                    padding: const EdgeInsets.symmetric(vertical: 10),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showAllStores(BuildContext context, StoreAvailabilityResponse availability) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: AppColors.surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      isScrollControlled: true,
-      builder: (context) => DraggableScrollableSheet(
-        initialChildSize: 0.6,
-        minChildSize: 0.3,
-        maxChildSize: 0.9,
-        expand: false,
-        builder: (context, scrollController) => Column(
-          children: [
-            // Handle bar
-            Container(
-              margin: const EdgeInsets.only(top: 12),
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: AppColors.textSecondary.withValues(alpha: 0.3),
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            // Title
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  const Icon(Icons.store, color: AppColors.primaryBlue),
-                  const SizedBox(width: 12),
-                  Text(
-                    '${availability.stores.length} Stores with Stock',
-                    style: const TextStyle(
-                      color: AppColors.textPrimary,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 18,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const Divider(color: AppColors.border, height: 1),
-            // Store list
-            Expanded(
-              child: ListView.separated(
-                controller: scrollController,
-                padding: const EdgeInsets.all(16),
-                itemCount: availability.stores.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 12),
-                itemBuilder: (context, index) {
-                  final store = availability.stores[index];
-                  return _buildStoreListItem(context, store, index == 0);
-                },
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildStoreListItem(
-    BuildContext context,
-    StoreAvailability store,
-    bool isNearest,
-  ) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: isNearest
-            ? AppColors.primaryBlue.withValues(alpha: 0.1)
-            : AppColors.surfaceVariant,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: isNearest
-              ? AppColors.primaryBlue.withValues(alpha: 0.3)
-              : AppColors.border,
-        ),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Text(
-                      store.name ?? 'Best Buy',
-                      style: const TextStyle(
-                        color: AppColors.textPrimary,
-                        fontWeight: FontWeight.w600,
-                        fontSize: 15,
-                      ),
-                    ),
-                    if (isNearest) ...[
-                      const SizedBox(width: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 6,
-                          vertical: 2,
-                        ),
-                        decoration: BoxDecoration(
-                          color: AppColors.primaryBlue,
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: const Text(
-                          'NEAREST',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 9,
-                          ),
-                        ),
-                      ),
-                    ],
-                    if (store.lowStock) ...[
-                      const SizedBox(width: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 6,
-                          vertical: 2,
-                        ),
-                        decoration: BoxDecoration(
-                          color: AppColors.accentYellow.withValues(alpha: 0.2),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: const Text(
-                          'LOW STOCK',
-                          style: TextStyle(
-                            color: AppColors.accentYellow,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 9,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  store.fullAddress,
-                  style: const TextStyle(
-                    color: AppColors.textSecondary,
-                    fontSize: 12,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 12),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              if (store.distance != null)
-                Text(
-                  store.distanceFormatted ?? '',
-                  style: const TextStyle(
-                    color: AppColors.accentYellow,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 14,
-                  ),
-                ),
-              const SizedBox(height: 6),
-              InkWell(
-                onTap: () => _openDirections(store),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: AppColors.primaryBlue.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.directions,
-                        size: 14,
-                        color: AppColors.primaryBlue,
-                      ),
-                      SizedBox(width: 4),
-                      Text(
-                        'Go',
-                        style: TextStyle(
-                          color: AppColors.primaryBlue,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _openDirections(StoreAvailability store) async {
-    final address = Uri.encodeComponent(store.fullAddress);
-    final url = 'https://www.google.com/maps/dir/?api=1&destination=$address';
-    final uri = Uri.parse(url);
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    }
-  }
-
-  void _showPostalCodeDialog(BuildContext context) {
-    final controller = TextEditingController(text: _userPostalCode);
-    
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: AppColors.surface,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-        ),
-        title: const Text(
-          'Enter ZIP Code',
-          style: TextStyle(color: AppColors.textPrimary),
-        ),
-        content: TextField(
-          controller: controller,
-          keyboardType: TextInputType.number,
-          maxLength: 5,
-          autofocus: true,
-          style: const TextStyle(
-            color: AppColors.textPrimary,
-            fontSize: 20,
-            letterSpacing: 4,
-          ),
-          textAlign: TextAlign.center,
-          decoration: InputDecoration(
-            hintText: '12345',
-            hintStyle: TextStyle(
-              color: AppColors.textSecondary.withValues(alpha: 0.5),
-              letterSpacing: 4,
-            ),
-            counterText: '',
-            contentPadding: const EdgeInsets.symmetric(
-              horizontal: 20,
-              vertical: 16,
-            ),
-            filled: true,
-            fillColor: AppColors.surfaceVariant,
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide.none,
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(
-                color: AppColors.primaryBlue,
-                width: 2,
-              ),
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text(
-              'Cancel',
-              style: TextStyle(color: AppColors.textSecondary),
-            ),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              if (controller.text.length == 5) {
-                _searchByPostalCode(controller.text);
-              }
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primaryBlue,
-            ),
-            child: const Text(
-              'Search',
-              style: TextStyle(color: Colors.white),
             ),
           ),
         ],
@@ -2338,208 +1382,6 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
     );
   }
 
-  Widget _buildCategorySection(BuildContext context) {
-    final categories = product.categoryPath;
-    final showExpand = categories.length > 2;
-    
-    // Get last 2 categories for collapsed view
-    final collapsedCategories = categories.length <= 2
-        ? categories
-        : categories.sublist(categories.length - 2);
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: AppColors.primaryBlue.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Icon(Icons.category_outlined,
-                  size: 20, color: AppColors.primaryBlue),
-            ),
-            const SizedBox(width: 12),
-            Text(
-              'Category',
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: AppColors.textPrimary,
-                  ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 16),
-        AnimatedCrossFade(
-          firstChild: _buildCollapsedCategoryView(collapsedCategories, categories.length),
-          secondChild: _buildExpandedCategoryView(categories),
-          crossFadeState: _categoryExpanded
-              ? CrossFadeState.showSecond
-              : CrossFadeState.showFirst,
-          duration: const Duration(milliseconds: 300),
-        ),
-        if (showExpand) ...[
-          const SizedBox(height: 12),
-          GestureDetector(
-            onTap: () => setState(() => _categoryExpanded = !_categoryExpanded),
-            child: Row(
-              children: [
-                Text(
-                  _categoryExpanded
-                      ? 'Show less'
-                      : 'Show full hierarchy (${categories.length} levels)',
-                  style: const TextStyle(
-                    color: AppColors.primaryBlue,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(width: 4),
-                Icon(
-                  _categoryExpanded
-                      ? Icons.keyboard_arrow_up
-                      : Icons.keyboard_arrow_down,
-                  color: AppColors.primaryBlue,
-                  size: 20,
-                ),
-              ],
-            ),
-          ),
-        ],
-      ],
-    );
-  }
-
-  Widget _buildCollapsedCategoryView(List<CategoryPath> categories, int totalCount) {
-    return Row(
-      children: [
-        if (totalCount > 2) ...[
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              color: AppColors.surfaceVariant,
-              borderRadius: BorderRadius.circular(6),
-            ),
-            child: Text(
-              '...',
-              style: TextStyle(
-                color: AppColors.textSecondary.withValues(alpha: 0.7),
-                fontSize: 12,
-              ),
-            ),
-          ),
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 6),
-            child: Icon(
-              Icons.chevron_right,
-              size: 16,
-              color: AppColors.textSecondary,
-            ),
-          ),
-        ],
-        ...categories.asMap().entries.map((entry) {
-          final isLast = entry.key == categories.length - 1;
-          return Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                decoration: BoxDecoration(
-                  color: isLast
-                      ? AppColors.primaryBlue.withValues(alpha: 0.15)
-                      : AppColors.surface,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                    color: isLast
-                        ? AppColors.primaryBlue.withValues(alpha: 0.4)
-                        : AppColors.border,
-                  ),
-                ),
-                child: Text(
-                  entry.value.name ?? 'Unknown',
-                  style: TextStyle(
-                    color: isLast ? AppColors.primaryBlue : AppColors.textSecondary,
-                    fontSize: 13,
-                    fontWeight: isLast ? FontWeight.w600 : FontWeight.normal,
-                  ),
-                ),
-              ),
-              if (!isLast)
-                const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 6),
-                  child: Icon(
-                    Icons.chevron_right,
-                    size: 16,
-                    color: AppColors.textSecondary,
-                  ),
-                ),
-            ],
-          );
-        }),
-      ],
-    );
-  }
-
-  Widget _buildExpandedCategoryView(List<CategoryPath> categories) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: categories.asMap().entries.map((entry) {
-          final index = entry.key;
-          final category = entry.value;
-          final isLast = index == categories.length - 1;
-          
-          return Padding(
-            padding: EdgeInsets.only(
-              left: index * 16.0,
-              top: index > 0 ? 8 : 0,
-            ),
-            child: Row(
-              children: [
-                if (index > 0)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: Icon(
-                      Icons.subdirectory_arrow_right,
-                      size: 16,
-                      color: AppColors.textSecondary.withValues(alpha: 0.5),
-                    ),
-                  ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: isLast
-                        ? AppColors.primaryBlue.withValues(alpha: 0.15)
-                        : AppColors.surfaceVariant,
-                    borderRadius: BorderRadius.circular(6),
-                    border: isLast
-                        ? Border.all(color: AppColors.primaryBlue.withValues(alpha: 0.4))
-                        : null,
-                  ),
-                  child: Text(
-                    category.name ?? 'Unknown',
-                    style: TextStyle(
-                      color: isLast ? AppColors.primaryBlue : AppColors.textSecondary,
-                      fontSize: 13,
-                      fontWeight: isLast ? FontWeight.w600 : FontWeight.normal,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          );
-        }).toList(),
-      ),
-    );
-  }
-
   Widget _buildOffersSection(BuildContext context) {
     return _buildSection(
       context,
@@ -2611,290 +1453,6 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
     );
   }
 
-  Widget _buildRatingSection(BuildContext context) {
-    final rating = product.customerReviewAverage!;
-    final count = product.customerReviewCount ?? 0;
-    
-    // Determine rating tier and color
-    final (String tier, Color tierColor) = switch (rating) {
-      >= 4.5 => ('Excellent', AppColors.success),
-      >= 4.0 => ('Very Good', const Color(0xFF8BC34A)),
-      >= 3.5 => ('Good', AppColors.accentYellow),
-      >= 3.0 => ('Average', const Color(0xFFFF9800)),
-      >= 2.0 => ('Fair', const Color(0xFFFF5722)),
-      _ => ('Poor', AppColors.error),
-    };
-    
-    // Review count context
-    final String countContext = switch (count) {
-      >= 1000 => 'Very popular',
-      >= 500 => 'Popular choice',
-      >= 100 => 'Well reviewed',
-      >= 25 => 'Reviewed',
-      >= 5 => 'Limited reviews',
-      _ => 'Few reviews',
-    };
-
-    return _buildSection(
-      context,
-      title: 'Customer Reviews',
-      icon: Icons.star_outline,
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppColors.border),
-        ),
-        child: Column(
-          children: [
-            // Main rating row
-            Row(
-              children: [
-                // Score display
-                Container(
-                  width: 72,
-                  height: 72,
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [
-                        tierColor.withValues(alpha: 0.2),
-                        tierColor.withValues(alpha: 0.1),
-                      ],
-                    ),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                      color: tierColor.withValues(alpha: 0.3),
-                    ),
-                  ),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        rating.toStringAsFixed(1),
-                        style: TextStyle(
-                          fontSize: 26,
-                          fontWeight: FontWeight.bold,
-                          color: tierColor,
-                          height: 1,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        'out of 5',
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: AppColors.textSecondary.withValues(alpha: 0.7),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 16),
-                // Rating details
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 4,
-                            ),
-                            decoration: BoxDecoration(
-                              color: tierColor.withValues(alpha: 0.15),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Text(
-                              tier,
-                              style: TextStyle(
-                                color: tierColor,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 12,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            countContext,
-                            style: const TextStyle(
-                              color: AppColors.textSecondary,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-                      // Star display
-                      Row(
-                        children: List.generate(5, (index) {
-                          if (index < rating.floor()) {
-                            return const Icon(Icons.star,
-                                color: AppColors.brightYellow, size: 20);
-                          } else if (index < rating) {
-                            return const Icon(Icons.star_half,
-                                color: AppColors.brightYellow, size: 20);
-                          } else {
-                            return Icon(Icons.star_border,
-                                color: AppColors.textSecondary.withValues(alpha: 0.4),
-                                size: 20);
-                          }
-                        }),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        '${_formatReviewCount(count)} ${count == 1 ? 'review' : 'reviews'}',
-                        style: const TextStyle(
-                          color: AppColors.textSecondary,
-                          fontSize: 13,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            // Rating distribution bar
-            ClipRRect(
-              borderRadius: BorderRadius.circular(4),
-              child: SizedBox(
-                height: 8,
-                child: Row(
-                  children: [
-                    Expanded(
-                      flex: (rating * 20).round(),
-                      child: Container(
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: [
-                              tierColor,
-                              tierColor.withValues(alpha: 0.7),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                    Expanded(
-                      flex: 100 - (rating * 20).round(),
-                      child: Container(
-                        color: AppColors.surfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 8),
-            // Scale labels
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  '1',
-                  style: TextStyle(
-                    fontSize: 10,
-                    color: AppColors.textSecondary.withValues(alpha: 0.6),
-                  ),
-                ),
-                Text(
-                  '5',
-                  style: TextStyle(
-                    fontSize: 10,
-                    color: AppColors.textSecondary.withValues(alpha: 0.6),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  String _formatReviewCount(int count) {
-    if (count >= 1000) {
-      return '${(count / 1000).toStringAsFixed(1)}k';
-    }
-    return count.toString();
-  }
-
-  Widget _buildActionButtons(BuildContext context) {
-    return Column(
-      children: [
-        // Primary row: Add to Cart and Ask AI
-        Row(
-          children: [
-            // Add to Cart button
-            Expanded(
-              child: ElevatedButton.icon(
-                onPressed: _toggleCart,
-                icon: Icon(
-                  _isInCart 
-                      ? Icons.check_circle_rounded 
-                      : Icons.add_shopping_cart_rounded,
-                  size: 18,
-                ),
-                label: Text(_isInCart ? 'In Cart' : 'Add to Cart'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: _isInCart 
-                      ? AppColors.success 
-                      : AppColors.primaryBlue,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(width: 12),
-            // Ask AI button
-            Expanded(
-              child: ElevatedButton.icon(
-                onPressed: () => _navigateToAskAI(context),
-                icon: const Icon(Icons.smart_toy_outlined, size: 18),
-                label: const Text('Ask AI'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.accentYellow,
-                  foregroundColor: AppColors.background,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-        // Secondary row: View on BestBuy
-        if (product.url != null) ...[
-          const SizedBox(height: 10),
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              onPressed: () => _openUrl(product.url!),
-              icon: const Icon(Icons.open_in_new, size: 16),
-              label: const Text('View on BestBuy.com'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppColors.textSecondary,
-                side: const BorderSide(color: AppColors.border),
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ],
-    );
-  }
-  
   void _navigateToAskAI(BuildContext context) {
     // Set the product as pending attachment (ChatPage will consume it)
     ChatManager.instance.setPendingProductAttachment(product);

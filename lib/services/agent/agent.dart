@@ -10,4 +10,5 @@ export 'tools/search_products_tool.dart';
 export 'tools/analyze_product_tool.dart';
 export 'tools/request_scan_tool.dart';
 export 'tools/cart_tools.dart';
+export 'tools/compare_products_tool.dart';
 
