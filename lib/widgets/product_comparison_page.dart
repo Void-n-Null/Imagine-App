@@ -5,10 +5,6 @@ import '../config/api_keys.dart';
 import '../services/bestbuy/bestbuy.dart';
 import '../services/comparison/comparison.dart';
 import '../theme/app_colors.dart';
-import 'product_comparison/horizontal_comparison_table.dart';
-import 'product_comparison/unique_attributes_section.dart';
-import 'product_comparison/vertical_product_card.dart';
-import 'product_comparison/vertical_summary.dart';
 import 'product_detail_page.dart';
 import 'scan_product_page.dart';
 
