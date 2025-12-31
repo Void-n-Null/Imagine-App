@@ -1,10 +1,15 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:webview_flutter/webview_flutter.dart';
+import 'package:flutter_web_auth_2/flutter_web_auth_2.dart';
 import '../../config/openrouter_config.dart';
 import '../../theme/app_colors.dart';
 import 'openrouter_auth_service.dart';
 
+/// OpenRouter OAuth authentication page.
+///
+/// Uses flutter_web_auth_2 which opens a secure browser tab
+/// (Chrome Custom Tabs on Android, ASWebAuthenticationSession on iOS).
+/// Google OAuth works properly in these secure browser contexts.
 class OpenRouterAuthPage extends StatefulWidget {
   const OpenRouterAuthPage({super.key});
 
@@ -13,222 +18,224 @@ class OpenRouterAuthPage extends StatefulWidget {
 }
 
 class _OpenRouterAuthPageState extends State<OpenRouterAuthPage> {
-  late final WebViewController _controller;
   late final OpenRouterAuthService _authService;
-  late final String _codeVerifier;
-  late final String _codeChallenge;
-  bool _isLoading = true;
   String? _error;
-  String _currentUrl = '';
-
-  // Use a desktop Chrome user agent to avoid mobile detection issues
-  static const String _desktopUserAgent = 
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
   @override
   void initState() {
     super.initState();
     _authService = OpenRouterAuthService();
-    _initAuth();
+    // Start auth flow immediately
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _startAuthFlow();
+    });
   }
 
-  Future<void> _initAuth() async {
-    // Generate PKCE codes
-    _codeVerifier = _authService.generateCodeVerifier();
-    _codeChallenge = _authService.generateCodeChallenge(_codeVerifier);
-    
-    // Store verifier for later
-    await _authService.storeVerifier(_codeVerifier);
+  Future<void> _startAuthFlow() async {
+    setState(() => _error = null);
 
-    // Build the auth URL
-    final authUrl = _buildAuthUrl();
-    debugPrint('🔐 OpenRouter Auth URL: $authUrl');
-    debugPrint('🔑 Code Verifier: $_codeVerifier');
-    debugPrint('🔑 Code Challenge: $_codeChallenge');
-    
-    _controller = WebViewController()
-      ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setBackgroundColor(AppColors.background)
-      ..setUserAgent(_desktopUserAgent)
-      ..setNavigationDelegate(
-        NavigationDelegate(
-          onProgress: (int progress) {
-            if (progress == 100) {
-              setState(() => _isLoading = false);
-            }
-          },
-          onPageStarted: (String url) {
-            debugPrint('📍 Page started: $url');
-            setState(() {
-              _isLoading = true;
-              _currentUrl = url;
-            });
-          },
-          onPageFinished: (String url) {
-            debugPrint('✅ Page finished: $url');
-            setState(() => _isLoading = false);
-          },
-          onNavigationRequest: (NavigationRequest request) {
-            debugPrint('🧭 Navigation request: ${request.url}');
-            
-            // Check if this is our callback URL (localhost)
-            if (request.url.startsWith('http://localhost:3000') ||
-                request.url.startsWith('http://localhost:3000/')) {
-              debugPrint('🎯 Callback detected!');
-              _handleCallback(request.url);
-              return NavigationDecision.prevent;
-            }
-            return NavigationDecision.navigate;
-          },
-          onWebResourceError: (WebResourceError error) {
-            debugPrint('❌ Web error: ${error.description} for ${error.url}');
-            // Check if error URL is our callback (localhost won't actually load)
-            if (error.url?.startsWith('http://localhost:3000') ?? false) {
-              debugPrint('🎯 Callback detected via error handler!');
-              _handleCallback(error.url!);
-              return;
-            }
-            // Don't show error for non-critical resources
-            if (error.errorType == WebResourceErrorType.unknown) {
-              return;
-            }
-          },
-          onUrlChange: (UrlChange change) {
-            debugPrint('🔄 URL changed: ${change.url}');
-            if (change.url != null) {
-              if (change.url!.startsWith('http://localhost:3000')) {
-                debugPrint('🎯 Callback detected via URL change!');
-                _handleCallback(change.url!);
-              }
-            }
-          },
+    try {
+      // Generate PKCE codes
+      final codeVerifier = _authService.generateCodeVerifier();
+      final codeChallenge = _authService.generateCodeChallenge(codeVerifier);
+
+      // Store verifier for later exchange
+      await _authService.storeVerifier(codeVerifier);
+
+      // Build the auth URL
+      final authUrl = _buildAuthUrl(codeChallenge);
+      debugPrint('🔐 OpenRouter Auth URL: $authUrl');
+      debugPrint('🔑 Callback scheme: ${OpenRouterConfig.callbackScheme}');
+
+      // Launch secure browser and wait for callback
+      // flutter_web_auth_2 uses Chrome Custom Tabs / ASWebAuthenticationSession
+      // which are secure browser contexts where Google OAuth works!
+      final result = await FlutterWebAuth2.authenticate(
+        url: authUrl,
+        callbackUrlScheme: OpenRouterConfig.callbackScheme,
+        options: const FlutterWebAuth2Options(
+          timeout: 300, // 5 minute timeout
+          preferEphemeral: false, // Use shared session so existing logins work
         ),
-      )
-      ..loadRequest(Uri.parse(authUrl));
+      );
 
-    setState(() {});
-  }
+      debugPrint('🔗 Auth result: $result');
 
-  String _buildAuthUrl() {
-    final callbackEncoded = Uri.encodeComponent(OpenRouterConfig.callbackUrl);
-    final challengeEncoded = Uri.encodeComponent(_codeChallenge);
-    return '${OpenRouterConfig.authUrl}?callback_url=$callbackEncoded&code_challenge=$challengeEncoded&code_challenge_method=S256';
-  }
-
-  Future<void> _handleCallback(String url) async {
-    debugPrint('🔓 Handling callback: $url');
-    final uri = Uri.parse(url);
-    final code = uri.queryParameters['code'];
-    
-    if (code != null) {
-      debugPrint('✅ Got auth code: $code');
-      setState(() => _isLoading = true);
-      
-      try {
-        await _authService.exchangeCode(code);
-        if (mounted) {
-          Navigator.of(context).pop(true); // Success
-        }
-      } catch (e) {
-        debugPrint('❌ Exchange failed: $e');
-        if (mounted) {
-          setState(() {
-            _error = 'Failed to complete auth: $e';
-            _isLoading = false;
-          });
-        }
-      }
-    } else {
-      // Check for error
+      // Parse the result URL to get the code
+      final uri = Uri.parse(result);
+      final code = uri.queryParameters['code'];
       final error = uri.queryParameters['error'];
-      debugPrint('❌ No code in callback. Error: $error');
-      setState(() {
-        _error = error ?? 'Authentication failed - no code received';
-        _isLoading = false;
-      });
+
+      if (error != null) {
+        throw Exception('Authorization denied: $error');
+      }
+
+      if (code == null) {
+        throw Exception('No authorization code received');
+      }
+
+      debugPrint('✅ Got auth code: $code');
+
+      // Exchange code for API key
+      await _authService.exchangeCode(code);
+
+      if (mounted) {
+        Navigator.of(context).pop(true); // Success!
+      }
+    } catch (e) {
+      debugPrint('❌ Auth flow error: $e');
+      if (mounted) {
+        setState(() => _error = _formatError(e));
+      }
     }
+  }
+
+  String _formatError(dynamic error) {
+    final message = error.toString();
+
+    // User cancelled
+    if (message.contains('CANCELED') || message.contains('cancelled')) {
+      return 'Authentication was cancelled';
+    }
+
+    // Timeout
+    if (message.contains('timeout') || message.contains('TIMEOUT')) {
+      return 'Authentication timed out. Please try again.';
+    }
+
+    return 'Authentication failed: $message';
+  }
+
+  String _buildAuthUrl(String codeChallenge) {
+    final callbackEncoded = Uri.encodeComponent(OpenRouterConfig.callbackUrl);
+    final challengeEncoded = Uri.encodeComponent(codeChallenge);
+    return '${OpenRouterConfig.authUrl}?callback_url=$callbackEncoded&code_challenge=$challengeEncoded&code_challenge_method=S256';
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: AppColors.background,
       appBar: AppBar(
+        backgroundColor: AppColors.surface,
         title: const Text('Connect OpenRouter'),
         leading: IconButton(
           icon: const Icon(Icons.close),
           onPressed: () => Navigator.of(context).pop(false),
         ),
-        actions: [
-          if (kDebugMode)
-            IconButton(
-              icon: const Icon(Icons.bug_report),
-              onPressed: () {
-                showDialog(
-                  context: context,
-                  builder: (ctx) => AlertDialog(
-                    title: const Text('Debug Info'),
-                    content: SingleChildScrollView(
-                      child: Text(
-                        'Current URL:\n$_currentUrl\n\n'
-                        'Callback URL:\n${OpenRouterConfig.callbackUrl}\n\n'
-                        'Code Challenge:\n$_codeChallenge',
-                      ),
-                    ),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(ctx),
-                        child: const Text('OK'),
-                      ),
-                    ],
-                  ),
-                );
-              },
-            ),
-        ],
       ),
-      body: Stack(
-        children: [
-          if (_error != null)
-            Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.error_outline, size: 64, color: AppColors.error),
-                    const SizedBox(height: 16),
-                    Text(
-                      _error!,
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: AppColors.error),
-                    ),
-                    const SizedBox(height: 24),
-                    ElevatedButton(
-                      onPressed: () {
-                        setState(() {
-                          _error = null;
-                          _isLoading = true;
-                        });
-                        _initAuth();
-                      },
-                      child: const Text('Retry'),
-                    ),
-                  ],
+      body: _buildBody(),
+    );
+  }
+
+  Widget _buildBody() {
+    if (_error != null) {
+      return _buildErrorState();
+    }
+
+    return _buildLoadingState();
+  }
+
+  Widget _buildLoadingState() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 80,
+              height: 80,
+              decoration: BoxDecoration(
+                color: AppColors.primaryBlue.withValues(alpha: 0.1),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.lock_open,
+                size: 40,
+                color: AppColors.primaryBlue,
+              ),
+            ),
+            const SizedBox(height: 24),
+            const Text(
+              'Connecting to OpenRouter',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textPrimary,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Complete sign-in in the browser window...',
+              style: TextStyle(
+                fontSize: 14,
+                color: AppColors.textSecondary,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 32),
+            const CircularProgressIndicator(
+              color: AppColors.primaryBlue,
+            ),
+            if (kDebugMode) ...[
+              const SizedBox(height: 32),
+              Text(
+                'Callback: ${OpenRouterConfig.callbackUrl}',
+                style: const TextStyle(
+                  fontSize: 10,
+                  color: AppColors.textSecondary,
                 ),
               ),
-            )
-          else
-            WebViewWidget(controller: _controller),
-          if (_isLoading)
-            Container(
-              color: AppColors.background.withValues(alpha: 0.7),
-              child: const Center(
-                child: CircularProgressIndicator(),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildErrorState() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.error_outline,
+              size: 64,
+              color: AppColors.error,
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Authentication Failed',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textPrimary,
               ),
             ),
-        ],
+            const SizedBox(height: 8),
+            Text(
+              _error!,
+              textAlign: TextAlign.center,
+              style: TextStyle(color: AppColors.textSecondary),
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton.icon(
+              onPressed: _startAuthFlow,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Try Again'),
+            ),
+            const SizedBox(height: 12),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel'),
+            ),
+          ],
+        ),
       ),
     );
   }
 }
-
