@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -86,6 +87,11 @@ class OpenRouterModelsService {
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
+        },
+      ).timeout(
+        const Duration(seconds: 10),
+        onTimeout: () {
+          throw TimeoutException('Models request timed out after 10 seconds');
         },
       );
       

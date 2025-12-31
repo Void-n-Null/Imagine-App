@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -82,6 +83,11 @@ class UpdateService {
         headers: {
           'Accept': 'application/vnd.github.v3+json',
           'User-Agent': 'ImagineApp/$currentVersion',
+        },
+      ).timeout(
+        const Duration(seconds: 10),
+        onTimeout: () {
+          throw TimeoutException('Update check timed out after 10 seconds');
         },
       );
 
