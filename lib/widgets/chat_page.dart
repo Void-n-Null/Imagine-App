@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../config/api_keys.dart';
 import '../services/agent/agent.dart';
@@ -33,7 +34,7 @@ const bool kShowToolCallDebug = false;
 class ChatPage extends StatefulWidget {
   /// Optional product to attach to the first message
   final BestBuyProduct? initialProduct;
-  
+
   const ChatPage({super.key, this.initialProduct});
 
   @override
@@ -43,7 +44,7 @@ class ChatPage extends StatefulWidget {
 class _ChatPageState extends State<ChatPage> {
   final TextEditingController _inputController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
-  
+
   late final OpenRouterAuthService _authService;
   late final BestBuyClient _bestBuyClient;
   late final ChatManager _chatManager;
@@ -52,27 +53,27 @@ class _ChatPageState extends State<ChatPage> {
   late final ChatAgentManager _agentManager;
   late final StatusQueueManager _statusManager;
   late final ScanRequestService _scanRequestService;
-  
+
   bool _isAuthenticated = false;
   bool _isProcessing = false;
   bool _isInitialized = false;
   bool _isNavigatingToScan = false; // Prevent duplicate navigations
-  
+
   // Product attachment for "Ask AI" feature
   BestBuyProduct? _attachedProduct;
-  
+
   /// Get messages from current thread
-  List<ChatMessage> get _messages => 
+  List<ChatMessage> get _messages =>
       _chatManager.currentThread?.messages ?? [];
-  
+
   /// Filter messages for display (hide system, tool result messages, and empty assistant messages)
-  List<ChatMessage> get _visibleMessages => 
+  List<ChatMessage> get _visibleMessages =>
       _messages.where((m) {
         if (m.role == MessageRole.system || m.role == MessageRole.tool) return false;
         if (m.role == MessageRole.assistant && m.content.isEmpty) return false;
         return true;
       }).toList();
-  
+
   /// Check if we're in landing state (no messages yet)
   bool get _isLandingState => _visibleMessages.isEmpty;
 
@@ -92,47 +93,47 @@ class _ChatPageState extends State<ChatPage> {
     );
     _statusManager = StatusQueueManager();
     _scanRequestService = ScanRequestService.instance;
-    
+
     // Initialize attached product from navigation
     _attachedProduct = widget.initialProduct;
-    
+
     // If we have an initial product, create a new thread for it
     if (widget.initialProduct != null) {
       _chatManager.createNewThread(initialProduct: widget.initialProduct);
     }
-    
+
     // Listen for chat manager changes
     _chatManager.addListener(_onChatManagerChanged);
-    
+
     // Listen for scan requests from AI tools
     _scanRequestService.addListener(_onScanRequestChanged);
-    
+
     // Register tools
     _registerTools();
-    
+
     _initialize();
   }
-  
+
   /// Handle scan request service changes
   void _onScanRequestChanged() {
     if (!mounted) return;
-    
+
     // If there's an active scan request and we're not already navigating, go to scanner
     if (_scanRequestService.hasActiveRequest && !_isNavigatingToScan) {
       _navigateToScannerForRequest();
     }
   }
-  
+
   /// Navigate to scanner page for an AI-requested scan
   void _navigateToScannerForRequest() {
     _isNavigatingToScan = true;
-    
+
     final request = _scanRequestService.activeRequest;
     if (request == null) {
       _isNavigatingToScan = false;
       return;
     }
-    
+
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (context) => const ScanProductPage(),
@@ -145,7 +146,7 @@ class _ChatPageState extends State<ChatPage> {
       _isNavigatingToScan = false;
     });
   }
-  
+
   void _onChatManagerChanged() {
     if (mounted) {
       // Check for pending product attachment
@@ -158,44 +159,62 @@ class _ChatPageState extends State<ChatPage> {
       _scrollToBottom();
     }
   }
-  
+
   void _clearAttachment() {
     setState(() {
       _attachedProduct = null;
     });
   }
-  
+
   Future<void> _initialize() async {
+    try {
+      // Set a maximum timeout for initialization
+      await Future.any([
+        _initializeInternal(),
+        Future.delayed(const Duration(seconds: 15), () {
+          throw TimeoutException('Initialization timed out after 15 seconds');
+        }),
+      ]);
+    } catch (e) {
+      debugPrint('❌ Initialization error: $e');
+      // Still mark as initialized so UI can render
+      if (mounted) {
+        setState(() => _isInitialized = true);
+      }
+    }
+  }
+
+  Future<void> _initializeInternal() async {
     await _checkAuthStatus();
     await _agentManager.loadSystemPrompt(_modelManager.selectedModelId);
     await _modelManager.loadModels();
     if (mounted) setState(() {});
-    
+
     setState(() => _isInitialized = true);
   }
 
   void _registerTools() {
     final registry = ToolRegistry.instance;
-    
+
     // Clear any existing tools (in case of hot reload)
     registry.clear();
-    
+
     // Register available tools
     registry.register(GetTimeTool());
     registry.register(SearchProductsTool(client: _bestBuyClient));
     registry.register(AnalyzeProductTool(client: _bestBuyClient));
     registry.register(RequestScanTool());
-    
+
     // Cart tools
     registry.register(AddToCartTool(client: _bestBuyClient));
     registry.register(RemoveFromCartTool());
     registry.register(ClearCartTool());
     registry.register(ViewCartTool());
-    
+
     // Comparison tools
     registry.register(CompareProductsTool(client: _bestBuyClient));
   }
-  
+
 
   @override
   void dispose() {
@@ -218,7 +237,7 @@ class _ChatPageState extends State<ChatPage> {
       });
     }
   }
-  
+
   void _showToolCallsDebug() {
     final toolCalls = extractToolCallsWithResults(_messages);
     if (toolCalls.isEmpty) {
@@ -234,7 +253,7 @@ class _ChatPageState extends State<ChatPage> {
       builder: (context) => ToolCallsListModal(toolCalls: toolCalls),
     );
   }
-  
+
   void _showThreadSelector() {
     showModalBottomSheet(
       context: context,
@@ -278,7 +297,7 @@ class _ChatPageState extends State<ChatPage> {
         builder: (context) => const OpenRouterAuthPage(),
       ),
     );
-    
+
     if (result == true) {
       await _checkAuthStatus();
       if (mounted) {
@@ -352,21 +371,21 @@ class _ChatPageState extends State<ChatPage> {
   Future<void> _sendMessage() async {
     final text = _inputController.text.trim();
     if (text.isEmpty || _isProcessing || _agentManager.agentRunner == null) return;
-    
+
     if (!_isAuthenticated) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please connect to OpenRouter first')),
       );
       return;
     }
-    
+
     // Ensure we have a thread
     _chatManager.getOrCreateCurrentThread();
-    
+
     // Capture attached product before clearing
     final attachedProduct = _attachedProduct;
     final attachedSku = attachedProduct?.sku;
-    
+
     // Create messages for the conversation
     if (attachedProduct != null) {
       // Add hidden context message with product info (for AI)
@@ -374,43 +393,43 @@ class _ChatPageState extends State<ChatPage> {
         'The user is asking about the following product:\n\n${attachedProduct.toAIContext()}'
       ));
     }
-    
+
     // Create user message with optional product attachment (for visual display)
     _chatManager.addMessage(ChatMessage.user(text, attachedProductSku: attachedSku));
-    
+
     setState(() {
       _attachedProduct = null; // Clear attachment after sending
       _isProcessing = true;
     });
     _inputController.clear();
     _scrollToBottom();
-    
+
     // Build the message context for the agent
     // Include all messages except the last user message (run() adds it separately)
     final allMessages = _chatManager.currentThread!.messages;
     final previousMessages = allMessages.sublist(0, allMessages.length - 1);
-    
+
     // Run the agent with the full context
     try {
       _statusManager.clear();
       _statusManager.addStatus("Thinking...");
-      
+
       await for (final message in _agentManager.agentRunner!.run(previousMessages, text)) {
         if (!mounted) return;
-        
+
         // Update status if tool calls are present
-        if (message.role == MessageRole.assistant && 
-            message.toolCalls != null && 
+        if (message.role == MessageRole.assistant &&
+            message.toolCalls != null &&
             message.toolCalls!.isNotEmpty) {
           for (final toolCall in message.toolCalls!) {
             _statusManager.addStatus(ToolRegistry.instance.getDisplayName(toolCall.name));
           }
         }
-        
+
         _chatManager.addMessage(message);
         _scrollToBottom();
       }
-      
+
       // Save thread after completion
       await _chatManager.saveCurrentThread();
     } catch (e) {
@@ -449,7 +468,7 @@ class _ChatPageState extends State<ChatPage> {
         ),
       );
     }
-    
+
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: _isLandingState ? _buildLandingAppBar() : buildChatAppBar(
@@ -477,7 +496,7 @@ class _ChatPageState extends State<ChatPage> {
           : _buildChatBody(),
     );
   }
-  
+
   /// Build a minimal app bar for landing state
   PreferredSizeWidget _buildLandingAppBar() {
     return AppBar(
@@ -507,7 +526,7 @@ class _ChatPageState extends State<ChatPage> {
       ],
     );
   }
-  
+
   /// Build the chat body with messages and input
   Widget _buildChatBody() {
     return Column(
@@ -540,7 +559,7 @@ class _ChatPageState extends State<ChatPage> {
                 ),
             ],
           ),
-        
+
         // Messages list
         Expanded(
           child: ListView.builder(
@@ -562,7 +581,7 @@ class _ChatPageState extends State<ChatPage> {
                   },
                 );
               }
-              
+
               return ChatMessageBubble(
                 message: _visibleMessages[index],
                 client: _bestBuyClient,
@@ -570,7 +589,7 @@ class _ChatPageState extends State<ChatPage> {
             },
           ),
         ),
-        
+
         // Input area (only when not in landing state)
         ChatInputArea(
           inputController: _inputController,
@@ -616,7 +635,7 @@ class _LandingComparisonButtonState extends State<_LandingComparisonButton> {
   @override
   Widget build(BuildContext context) {
     final itemCount = _comparison.itemCount;
-    
+
     return IconButton(
       icon: Badge(
         isLabelVisible: itemCount > 0,
@@ -666,7 +685,7 @@ class _LandingCartButtonState extends State<_LandingCartButton> {
   @override
   Widget build(BuildContext context) {
     final itemCount = _cart.itemCount;
-    
+
     return IconButton(
       icon: Badge(
         isLabelVisible: itemCount > 0,
